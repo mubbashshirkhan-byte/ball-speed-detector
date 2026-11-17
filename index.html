@@ -1,0 +1,667 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Ball Speed"><meta name="theme-color" content="#0B0F14"><title>Ball Speed Detector</title><style>
+  :root {
+    color-scheme: dark;
+    --bg: #0B0F14; --card: #151B23; --text: #F2F5F8; --muted: #8A96A3;
+    --accent: #2DD4A7; --danger: #F2645A; --border: #232B36; --line: #FFD24A;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px; display: flex; flex-direction: column; overflow: hidden;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+             env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    -webkit-user-select: none; user-select: none;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  #stage {
+    flex: 1 1 45%; min-height: 0; min-width: 0; position: relative;
+    display: flex; align-items: center; justify-content: center; background: #000;
+  }
+  #frame { position: relative; width: 100%; height: 100%; }
+  #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  #stage-msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 24px; text-align: center; color: var(--muted); line-height: 1.5;
+  }
+  #hint {
+    position: absolute; left: 8px; right: 8px; bottom: 6px; text-align: center;
+    font-size: 12px; color: #fff; text-shadow: 0 1px 3px #000; pointer-events: none;
+  }
+
+  #panel {
+    flex: 1 1 55%; min-height: 0; overflow-y: auto; padding: 12px 14px 14px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  #readout {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 10px 14px;
+  }
+  #readout.noball { background: var(--danger); border-color: var(--danger); color: #1A0503; }
+  #readout.noball #unit-label, #readout.noball #verdict { color: #1A0503; }
+  #speed { font-size: 60px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  #unit-label { color: var(--muted); font-size: 16px; font-weight: 600; margin-left: 6px; }
+  #verdict { font-size: 20px; font-weight: 800; text-align: right; color: var(--muted); }
+  #verdict.legal { color: var(--accent); }
+
+  #status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  #dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  #dot.live { background: var(--accent); }
+  #dot.problem { background: var(--danger); }
+
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .field.wide { grid-column: 1 / -1; }
+  .field label, .field .label { color: var(--muted); font-size: 12.5px; }
+  .field input[type="number"] {
+    width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--card); padding: 0 12px; font-size: 18px; font-weight: 700;
+    -webkit-user-select: text; user-select: text;
+  }
+  .field input[type="range"] { width: 100%; height: 32px; accent-color: var(--accent); }
+  .seg { display: flex; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 3px; height: 44px; }
+  .seg button { flex: 1; border: 0; background: transparent; color: var(--muted); font-weight: 600; border-radius: 7px; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+
+  .actions { display: flex; gap: 10px; }
+  .btn { height: 50px; border-radius: 12px; border: 0; font-weight: 700; font-size: 16px; }
+  .btn:active { opacity: 0.7; }
+  #btn-toggle { flex: 1; background: var(--accent); color: var(--bg); }
+  #btn-toggle.stop { background: var(--danger); }
+  #btn-sound { flex: 0.8; background: var(--card); border: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+
+  #history { display: flex; flex-direction: column; gap: 6px; }
+  #history .row {
+    display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px;
+    background: var(--card); border-radius: 10px; font-variant-numeric: tabular-nums;
+  }
+  #history .row b.nb { color: var(--danger); }
+  #history .row b.ok { color: var(--accent); }
+  #history .empty { color: var(--muted); font-size: 13px; }
+
+  @media (orientation: landscape) {
+    body { flex-direction: row; }
+    #stage { flex: 1 1 62%; }
+    #panel { flex: 0 0 38%; max-width: 380px; }
+    #speed { font-size: 48px; }
+  }
+</style></head><body>
+  <div id="stage">
+    <div id="frame">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+      <div id="hint">Drag lines A and B onto two marks on the pitch</div>
+    </div>
+    <div id="stage-msg">Starting camera…</div>
+  </div>
+
+  <div id="panel">
+    <div id="readout">
+      <div><span id="speed">--</span><span id="unit-label">km/h</span></div>
+      <div id="verdict">Waiting</div>
+    </div>
+
+    <div id="status"><span id="dot"></span><span id="status-text">Starting camera…</span></div>
+
+    <div class="fields">
+      <div class="field">
+        <label for="limit" id="limit-label">Max speed (km/h)</label>
+        <input id="limit" type="number" inputmode="decimal" min="1" step="1">
+      </div>
+      <div class="field">
+        <label for="distance">A to B distance (m)</label>
+        <input id="distance" type="number" inputmode="decimal" min="0.5" step="0.1">
+      </div>
+      <div class="field">
+        <span class="label">Unit</span>
+        <div class="seg" role="group" aria-label="Speed unit">
+          <button id="unit-kmh" type="button" data-unit="km/h">km/h</button>
+          <button id="unit-mph" type="button" data-unit="mph">mph</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="sens">Sensitivity</label>
+        <input id="sens" type="range" min="1" max="10" step="1">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="btn-sound" type="button">Test sound</button>
+      <button class="btn stop" id="btn-toggle" type="button">Pause</button>
+    </div>
+
+    <div id="history"><div class="empty">Deliveries will be listed here.</div></div>
+  </div>
+<script>
+function createDetector(width, height) {
+  var n = width * height;
+  var bg = new Float32Array(n);
+  var mask = new Uint8Array(n);
+  var stack = new Int32Array(n);
+  var hasBg = false;
+  var tracks = [];
+  var cooldownUntil = -1;
+  var pending = null;
+
+  var MIN_AREA = 3;
+  var MAX_BLOB_W = Math.round(width * 0.16);            // allows for motion-blur streaks
+  var MAX_BLOB_H = Math.max(10, Math.round(height * 0.07));
+  var MIN_V = width * 0.25;                             // px/s; slower things are not a bowled ball
+  var MAX_V = width * 8;
+  var EXPIRE_S = 0.18;                                  // a track ends after this long unseen
+  var COOLDOWN_S = 1.0;                                 // one reading per delivery
+  var MIN_POINTS = 4;
+  var MAX_FIT_POINTS = 14;
+  var MAX_BLOBS = 40;
+  var MAX_TRACKS = 30;
+  var BG_RATE = 0.06;
+  var BUSY_FRACTION = 0.12;                             // more motion than this = camera moved
+
+  function reset() { hasBg = false; tracks = []; pending = null; }
+
+  function median(a) {
+    a.sort(function (p, q) { return p - q; });
+    var h = a.length >> 1;
+    return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2;
+  }
+
+  // Theil-Sen fit: the median of all pairwise slopes. Unlike least squares it is
+  // not pulled off by a stray point (e.g. a fragment of the bowler joining the track).
+  function fit(pts) {
+    var m = Math.min(pts.length, MAX_FIT_POINTS);
+    var slopes = [], i, j;
+    for (i = 0; i < m; i++) {
+      for (j = i + 1; j < m; j++) {
+        var dt = pts[j].t - pts[i].t;
+        if (dt > 0) slopes.push((pts[j].x - pts[i].x) / dt);
+      }
+    }
+    if (!slopes.length) return null;
+    var slope = median(slopes);
+    var offsets = [];
+    for (i = 0; i < m; i++) offsets.push(pts[i].x - slope * pts[i].t);
+    var intercept = median(offsets);
+    var span = slope * (pts[m - 1].t - pts[0].t); if (span < 0) span = -span;
+    var tol = Math.max(3, span * 0.02);
+    var inliers = 0;
+    for (i = 0; i < m; i++) {
+      var r = pts[i].x - (slope * pts[i].t + intercept);
+      if ((r < 0 ? -r : r) <= tol) inliers++;
+    }
+    return { slope: slope, inliers: inliers, count: m };
+  }
+
+  function findBlobs(x0, x1) {
+    var blobs = [];
+    for (var y = 0; y < height; y++) {
+      for (var x = x0; x < x1; x++) {
+        var start = y * width + x;
+        if (!mask[start]) continue;
+        var sp = 0, area = 0, sumX = 0, sumY = 0;
+        var minX = x, maxX = x, minY = y, maxY = y;
+        stack[sp++] = start; mask[start] = 0;
+        while (sp > 0) {
+          var i = stack[--sp];
+          var py = (i / width) | 0, px = i - py * width;
+          area++; sumX += px; sumY += py;
+          if (px < minX) minX = px; if (px > maxX) maxX = px;
+          if (py < minY) minY = py; if (py > maxY) maxY = py;
+          for (var oy = -1; oy <= 1; oy++) {
+            var ny = py + oy;
+            if (ny < 0 || ny >= height) continue;
+            for (var ox = -1; ox <= 1; ox++) {
+              var nx = px + ox;
+              if (nx < x0 || nx >= x1) continue;
+              var j = ny * width + nx;
+              if (mask[j]) { mask[j] = 0; stack[sp++] = j; }
+            }
+          }
+        }
+        if (area >= MIN_AREA && (maxX - minX + 1) <= MAX_BLOB_W && (maxY - minY + 1) <= MAX_BLOB_H
+            && blobs.length < MAX_BLOBS) {
+          blobs.push({ x: sumX / area, y: sumY / area, area: area });
+        }
+      }
+    }
+    return blobs;
+  }
+
+  function updateTracks(blobs, t) {
+    var i, k;
+    for (k = 0; k < tracks.length; k++) {
+      var tr = tracks[k];
+      var last = tr.pts[tr.pts.length - 1];
+      var dt = t - last.t;
+      if (dt <= 0) continue;
+      var best = -1, bestScore = Infinity, bestV = 0;
+      for (i = 0; i < blobs.length; i++) {
+        var b = blobs[i];
+        var dx = b.x - last.x;
+        var v = dx / dt, av = v < 0 ? -v : v;
+        if (av < MIN_V || av > MAX_V) continue;
+        var dy = b.y - last.y; if (dy < 0) dy = -dy;
+        if (dy > (dx < 0 ? -dx : dx) * 0.9 + 6) continue;
+        var score = dy / height;
+        if (tr.pts.length >= 2) {
+          if ((v > 0) !== (tr.vx > 0)) continue;
+          var ratio = av / (tr.vx < 0 ? -tr.vx : tr.vx);
+          if (ratio < 0.55 || ratio > 1.8) continue;
+          score += ratio > 1 ? ratio - 1 : 1 - ratio;
+        }
+        if (score < bestScore) { bestScore = score; best = i; bestV = v; }
+      }
+      if (best >= 0) {
+        tr.vx = tr.pts.length === 1 ? bestV : tr.vx * 0.5 + bestV * 0.5;
+        tr.pts.push({ t: t, x: blobs[best].x, y: blobs[best].y });
+        blobs[best].linked = true;
+      }
+    }
+    // Any blob that did not continue a track may be the start of one.
+    for (i = 0; i < blobs.length; i++) {
+      if (!blobs[i].linked) tracks.push({ pts: [{ t: t, x: blobs[i].x, y: blobs[i].y }], vx: 0 });
+    }
+    if (tracks.length > MAX_TRACKS) {
+      tracks.sort(function (a, b) { return b.pts.length - a.pts.length; });
+      tracks.length = MAX_TRACKS;
+    }
+  }
+
+  function collectFinished(t, roiW) {
+    var alive = [], k;
+    for (k = 0; k < tracks.length; k++) {
+      var tr = tracks[k];
+      var pts = tr.pts;
+      if (t - pts[pts.length - 1].t <= EXPIRE_S) { alive.push(tr); continue; }
+      if (pts.length < MIN_POINTS) continue;
+      var span = pts[pts.length - 1].x - pts[0].x; if (span < 0) span = -span;
+      if (span < roiW * 0.2) continue;
+      var f = fit(pts);
+      if (!f || f.inliers < MIN_POINTS || f.inliers < f.count * 0.7) continue;
+      if (!pending || f.inliers > pending.inliers) {
+        pending = {
+          pxPerSec: f.slope < 0 ? -f.slope : f.slope,
+          direction: f.slope > 0 ? 1 : -1,
+          points: pts,
+          inliers: f.inliers,
+          at: t
+        };
+      }
+    }
+    tracks = alive;
+    if (!pending) return null;
+    // Hold the reading while another track is still being followed: a short
+    // stray track can end before the real one does.
+    if (t - pending.at < 0.6) {
+      for (k = 0; k < alive.length; k++) if (alive[k].pts.length >= 3) return null;
+    }
+    var event = pending;
+    pending = null;
+    return event;
+  }
+
+  /**
+   * rgba: Uint8ClampedArray of a width x height frame. t: frame time in seconds.
+   * x0/x1: pixel columns of the two calibration lines. threshold: 0-255 brightness change.
+   */
+  function process(rgba, t, x0, x1, threshold) {
+    var result = { blobs: [], event: null, busy: false };
+    x0 = Math.max(0, Math.min(width, Math.round(x0)));
+    x1 = Math.max(0, Math.min(width, Math.round(x1)));
+    if (x1 < x0) { var tmp = x0; x0 = x1; x1 = tmp; }
+    var roiW = x1 - x0;
+    if (roiW < 8) return result;
+
+    var x, y, i, p, g, d;
+    if (!hasBg) {
+      for (i = 0, p = 0; i < n; i++, p += 4) {
+        bg[i] = (rgba[p] * 77 + rgba[p + 1] * 150 + rgba[p + 2] * 29) >> 8;
+      }
+      hasBg = true;
+      return result;
+    }
+
+    var changed = 0;
+    for (y = 0; y < height; y++) {
+      i = y * width + x0; p = i * 4;
+      for (x = x0; x < x1; x++, i++, p += 4) {
+        g = (rgba[p] * 77 + rgba[p + 1] * 150 + rgba[p + 2] * 29) >> 8;
+        d = g - bg[i];
+        bg[i] += d * BG_RATE;
+        if (d < 0) d = -d;
+        if (d > threshold) { mask[i] = 1; changed++; } else { mask[i] = 0; }
+      }
+    }
+
+    if (changed > roiW * height * BUSY_FRACTION) {
+      // The whole view changed (camera bumped, light switched). Start over.
+      reset();
+      result.busy = true;
+      return result;
+    }
+
+    var blobs = findBlobs(x0, x1);
+    result.blobs = blobs;
+    if (t < cooldownUntil) { tracks = []; return result; }
+
+    updateTracks(blobs, t);
+    var event = collectFinished(t, roiW);
+    if (event) {
+      result.event = event;
+      cooldownUntil = t + COOLDOWN_S;
+      tracks = [];
+    }
+    return result;
+  }
+
+  return { process: process, reset: reset };
+}
+</script><script>
+(function () {
+  var UNITS = { 'km/h': 3.6, 'mph': 2.236936 };
+  var PROC_MAX = 640;          // longest side of the frame the detector sees
+  var KEY = 'ball-speed-settings-v1';
+
+  var settings = { limit: 100, unit: 'km/h', distance: 10, a: 0.2, b: 0.8, sens: 6 };
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (saved) for (var k in settings) if (saved[k] != null) settings[k] = saved[k];
+  } catch (e) {}
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var video = $('video'), overlay = $('overlay'), frameEl = $('frame'), stage = $('stage');
+  var octx = overlay.getContext('2d');
+  var proc = document.createElement('canvas');
+  var pctx = proc.getContext('2d', { willReadFrequently: true });
+
+  var detector = null, running = true, cameraOk = false, busy = false;
+  var lastT = -1, fps = 0, blobs = [], lastTrack = null, lastTrackAt = 0;
+  var history = [];
+
+  function speak(text) {
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'speak', text: text }));
+    } else if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en'; u.volume = 1;
+      window.speechSynthesis.speak(u);
+    }
+  }
+  // In a browser (the web version), iOS Safari only lets a page speak after the
+  // person has touched it once, so unlock the voice on the first touch.
+  if (!window.ReactNativeWebView && window.speechSynthesis) {
+    var unlock = function () {
+      document.removeEventListener('pointerdown', unlock, true);
+      var u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    };
+    document.addEventListener('pointerdown', unlock, true);
+  }
+
+  // ---------- layout: fit the video frame inside the stage ----------
+  function layout() {
+    var vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return;
+    var sw = stage.clientWidth, sh = stage.clientHeight;
+    var scale = Math.min(sw / vw, sh / vh);
+    var w = Math.floor(vw * scale), h = Math.floor(vh * scale);
+    frameEl.style.width = w + 'px';
+    frameEl.style.height = h + 'px';
+    var dpr = window.devicePixelRatio || 1;
+    overlay.width = Math.round(w * dpr);
+    overlay.height = Math.round(h * dpr);
+
+    var ps = PROC_MAX / Math.max(vw, vh);
+    var pw = Math.round(vw * ps), ph = Math.round(vh * ps);
+    if (proc.width !== pw || proc.height !== ph) {
+      proc.width = pw; proc.height = ph;
+      detector = createDetector(pw, ph);
+    }
+    drawOverlay();
+  }
+  window.addEventListener('resize', layout);
+  video.addEventListener('loadedmetadata', layout);
+  video.addEventListener('resize', layout);
+
+  // ---------- overlay: calibration lines, detected ball ----------
+  function drawOverlay() {
+    var w = overlay.width, h = overlay.height;
+    if (!w) return;
+    var dpr = window.devicePixelRatio || 1;
+    octx.clearRect(0, 0, w, h);
+    var xa = settings.a * w, xb = settings.b * w;
+    var lo = Math.min(xa, xb), hi = Math.max(xa, xb);
+    octx.fillStyle = 'rgba(0,0,0,0.45)';
+    octx.fillRect(0, 0, lo, h);
+    octx.fillRect(hi, 0, w - hi, h);
+
+    octx.lineWidth = 2 * dpr;
+    octx.font = 'bold ' + (14 * dpr) + 'px system-ui, sans-serif';
+    octx.textAlign = 'center';
+    [['A', xa], ['B', xb]].forEach(function (l) {
+      octx.strokeStyle = '#FFD24A';
+      octx.beginPath(); octx.moveTo(l[1], 0); octx.lineTo(l[1], h); octx.stroke();
+      octx.fillStyle = '#FFD24A';
+      octx.beginPath(); octx.arc(l[1], 18 * dpr, 13 * dpr, 0, Math.PI * 2); octx.fill();
+      octx.fillStyle = '#0B0F14';
+      octx.fillText(l[0], l[1], 23 * dpr);
+    });
+
+    var sx = w / proc.width, sy = h / proc.height, i;
+    octx.strokeStyle = '#2DD4A7';
+    for (i = 0; i < blobs.length; i++) {
+      octx.beginPath(); octx.arc(blobs[i].x * sx, blobs[i].y * sy, 6 * dpr, 0, Math.PI * 2); octx.stroke();
+    }
+    if (lastTrack && performance.now() - lastTrackAt < 4000) {
+      octx.strokeStyle = '#FFFFFF';
+      octx.lineWidth = 3 * dpr;
+      octx.beginPath();
+      for (i = 0; i < lastTrack.length; i++) {
+        var px = lastTrack[i].x * sx, py = lastTrack[i].y * sy;
+        if (i === 0) octx.moveTo(px, py); else octx.lineTo(px, py);
+      }
+      octx.stroke();
+    }
+  }
+
+  var dragging = null;
+  function pointerX(e) {
+    var r = overlay.getBoundingClientRect();
+    return Math.max(0.02, Math.min(0.98, (e.clientX - r.left) / r.width));
+  }
+  overlay.addEventListener('pointerdown', function (e) {
+    var x = pointerX(e);
+    dragging = Math.abs(x - settings.a) <= Math.abs(x - settings.b) ? 'a' : 'b';
+    settings[dragging] = x;
+    overlay.setPointerCapture(e.pointerId);
+    $('hint').hidden = true;
+    drawOverlay();
+  });
+  overlay.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    settings[dragging] = pointerX(e);
+    drawOverlay();
+  });
+  function endDrag() {
+    if (!dragging) return;
+    dragging = null;
+    if (detector) detector.reset();
+    save();
+  }
+  overlay.addEventListener('pointerup', endDrag);
+  overlay.addEventListener('pointercancel', endDrag);
+
+  // ---------- readout ----------
+  function renderStatus() {
+    var dot = $('dot'), text;
+    if (!cameraOk) { dot.className = 'problem'; text = $('stage-msg').textContent; }
+    else if (!running) { dot.className = ''; text = 'Paused'; }
+    else if (busy) { dot.className = 'problem'; text = 'Camera is moving. Keep the phone still.'; }
+    else { dot.className = 'live'; text = 'Watching for the ball' + (fps ? ' · ' + Math.round(fps) + ' frames/s' : ''); }
+    $('status-text').textContent = text;
+    var btn = $('btn-toggle');
+    btn.textContent = running ? 'Pause' : 'Start';
+    btn.className = 'btn' + (running ? ' stop' : '');
+  }
+
+  function renderSettings() {
+    $('limit').value = settings.limit;
+    $('distance').value = settings.distance;
+    $('sens').value = settings.sens;
+    $('limit-label').textContent = 'Max speed (' + settings.unit + ')';
+    $('unit-label').textContent = settings.unit;
+    $('unit-kmh').setAttribute('aria-pressed', String(settings.unit === 'km/h'));
+    $('unit-mph').setAttribute('aria-pressed', String(settings.unit === 'mph'));
+  }
+
+  function renderHistory() {
+    var box = $('history');
+    box.textContent = '';
+    if (!history.length) {
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Deliveries will be listed here.';
+      box.appendChild(empty);
+      return;
+    }
+    history.forEach(function (d) {
+      var row = document.createElement('div'); row.className = 'row';
+      var left = document.createElement('span');
+      left.textContent = d.time + '  ·  ' + (d.mps * UNITS[settings.unit]).toFixed(1) + ' ' + settings.unit;
+      var right = document.createElement('b');
+      right.className = d.noBall ? 'nb' : 'ok';
+      right.textContent = d.noBall ? 'NO BALL' : 'Legal';
+      row.appendChild(left); row.appendChild(right);
+      box.appendChild(row);
+    });
+  }
+
+  function renderLast() {
+    var d = history[0];
+    $('readout').className = d && d.noBall ? 'noball' : '';
+    $('speed').textContent = d ? (d.mps * UNITS[settings.unit]).toFixed(1) : '--';
+    $('verdict').className = d && !d.noBall ? 'legal' : '';
+    $('verdict').textContent = d ? (d.noBall ? 'NO BALL' : 'Legal') : 'Waiting';
+  }
+
+  function onDelivery(event) {
+    var gapPx = Math.abs(settings.b - settings.a) * proc.width;
+    if (gapPx < 8 || !(settings.distance > 0)) return;
+    var mps = event.pxPerSec * settings.distance / gapPx;
+    var shown = mps * UNITS[settings.unit];
+    var noBall = shown > settings.limit;
+    var now = new Date();
+    var pad = function (v) { return String(v).padStart(2, '0'); };
+    history.unshift({
+      mps: mps, noBall: noBall,
+      time: pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds())
+    });
+    if (history.length > 8) history.pop();
+    lastTrack = event.points; lastTrackAt = performance.now();
+    if (noBall) speak('No ball');
+    renderLast(); renderHistory();
+  }
+
+  // ---------- frame loop ----------
+  function threshold() { return 46 - settings.sens * 4; } // sensitivity 1..10 -> 42..6
+
+  function onFrame(now, meta) {
+    schedule();
+    if (!cameraOk || !running || !detector || video.readyState < 2) return;
+    var t = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : now / 1000;
+    if (t <= lastT) return;
+    if (lastT >= 0) {
+      var inst = 1 / (t - lastT);
+      fps = fps ? fps * 0.9 + inst * 0.1 : inst;
+    }
+    lastT = t;
+    pctx.drawImage(video, 0, 0, proc.width, proc.height);
+    var img = pctx.getImageData(0, 0, proc.width, proc.height);
+    var r = detector.process(img.data, t, settings.a * proc.width, settings.b * proc.width, threshold());
+    blobs = r.blobs;
+    if (r.busy !== busy) { busy = r.busy; renderStatus(); }
+    if (r.event) onDelivery(r.event);
+    drawOverlay();
+  }
+  function schedule() {
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
+    else requestAnimationFrame(function (now) { onFrame(now, null); });
+  }
+  setInterval(function () { if (cameraOk && running && !busy) renderStatus(); }, 1000);
+
+  // ---------- controls ----------
+  $('limit').addEventListener('change', function () {
+    var v = parseFloat(this.value);
+    if (v > 0) { settings.limit = v; save(); } else { this.value = settings.limit; }
+  });
+  $('distance').addEventListener('change', function () {
+    var v = parseFloat(this.value);
+    if (v > 0) { settings.distance = v; save(); } else { this.value = settings.distance; }
+  });
+  $('sens').addEventListener('input', function () { settings.sens = parseInt(this.value, 10) || 6; save(); });
+  ['unit-kmh', 'unit-mph'].forEach(function (id) {
+    $(id).addEventListener('click', function () {
+      var next = this.getAttribute('data-unit');
+      if (next === settings.unit) return;
+      // Keep the limit meaning the same real speed when the unit changes.
+      settings.limit = Math.round(settings.limit / UNITS[settings.unit] * UNITS[next]);
+      settings.unit = next;
+      save(); renderSettings(); renderLast(); renderHistory();
+    });
+  });
+  $('btn-toggle').addEventListener('click', function () {
+    running = !running;
+    blobs = []; lastT = -1; fps = 0;
+    if (detector) detector.reset();
+    renderStatus(); drawOverlay();
+  });
+  $('btn-sound').addEventListener('click', function () { speak('No ball'); });
+
+  // ---------- camera ----------
+  function cameraError(message) {
+    cameraOk = false;
+    $('stage-msg').hidden = false;
+    $('stage-msg').textContent = message;
+    frameEl.hidden = true;
+    renderStatus();
+  }
+
+  function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      cameraError('This device does not give the app access to the camera.');
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 }, height: { ideal: 720 },
+        frameRate: { ideal: 60 }
+      }
+    }).then(function (stream) {
+      video.srcObject = stream;
+      return video.play();
+    }).then(function () {
+      cameraOk = true;
+      $('stage-msg').hidden = true;
+      frameEl.hidden = false;
+      layout(); renderStatus(); schedule();
+    }).catch(function (err) {
+      var denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      cameraError(denied
+        ? 'Camera permission was refused. Allow camera access for this app in your phone settings, then reopen it.'
+        : 'Could not start the camera' + (err && err.message ? ': ' + err.message : '.'));
+    });
+  }
+
+  frameEl.hidden = true;
+  renderSettings(); renderLast(); renderHistory(); renderStatus();
+  startCamera();
+})();
+</script></body></html>
