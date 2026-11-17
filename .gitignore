@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# sign-in: private signing key and the local page that issues access codes
+access-private-key.json
+access-admin.html
+

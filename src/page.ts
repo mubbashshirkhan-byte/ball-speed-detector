@@ -5,6 +5,7 @@ import { DETECTOR_JS } from './detector';
  * access to camera pixels (getUserMedia + canvas) in Expo Go, with no native
  * build step. The page talks to the app through window.ReactNativeWebView:
  *   { type: 'speak', text }  -> the app says the text aloud.
+ * The same page is published as the web version (scripts/build-web.mjs).
  * Keep the embedded code free of backticks and dollar-brace sequences.
  */
 const STYLE = String.raw`
@@ -14,20 +15,22 @@ const STYLE = String.raw`
     --accent: #2DD4A7; --danger: #F2645A; --border: #232B36; --line: #FFD24A;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--bg); color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 15px; display: flex; flex-direction: column; overflow: hidden;
+    font-size: 15px; overflow: hidden;
     padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
              env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
     -webkit-user-select: none; user-select: none;
   }
-  button, input { font: inherit; color: inherit; }
+  button, input, select, textarea { font: inherit; color: inherit; }
   button { cursor: pointer; }
 
+  #app { height: 100%; display: flex; flex-direction: column; }
   #stage {
-    flex: 1 1 45%; min-height: 0; min-width: 0; position: relative;
+    flex: 1 1 42%; min-height: 0; min-width: 0; position: relative;
     display: flex; align-items: center; justify-content: center; background: #000;
   }
   #frame { position: relative; width: 100%; height: 100%; }
@@ -43,7 +46,7 @@ const STYLE = String.raw`
   }
 
   #panel {
-    flex: 1 1 55%; min-height: 0; overflow-y: auto; padding: 12px 14px 14px;
+    flex: 1 1 58%; min-height: 0; overflow-y: auto; padding: 12px 14px 14px;
     display: flex; flex-direction: column; gap: 12px;
   }
   #readout {
@@ -66,39 +69,70 @@ const STYLE = String.raw`
   .field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .field.wide { grid-column: 1 / -1; }
   .field label, .field .label { color: var(--muted); font-size: 12.5px; }
-  .field input[type="number"] {
-    width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--border);
-    background: var(--card); padding: 0 12px; font-size: 18px; font-weight: 700;
-    -webkit-user-select: text; user-select: text;
+  .field input[type="number"], .field input[type="text"], .field select {
+    width: 100%; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); padding: 0 12px; font-size: 17px; font-weight: 600;
   }
-  .field select {
-    width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--border);
-    background: var(--card); color: var(--text); padding: 0 8px; font: inherit; font-weight: 600;
-  }
-  [hidden] { display: none !important; }
+  .field input { -webkit-user-select: text; user-select: text; }
   .field input[type="range"] { width: 100%; height: 32px; accent-color: var(--accent); }
+  .inline { display: flex; gap: 8px; }
+  .inline > :first-child { flex: 1; }
   .seg { display: flex; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 3px; height: 44px; }
   .seg button { flex: 1; border: 0; background: transparent; color: var(--muted); font-weight: 600; border-radius: 7px; }
   .seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
 
   .actions { display: flex; gap: 10px; }
-  .btn { height: 50px; border-radius: 12px; border: 0; font-weight: 700; font-size: 16px; }
+  .btn { height: 50px; border-radius: 12px; border: 0; font-weight: 700; font-size: 16px; padding: 0 16px; }
   .btn:active { opacity: 0.7; }
-  #btn-toggle { flex: 1; background: var(--accent); color: var(--bg); }
-  #btn-toggle.stop { background: var(--danger); }
-  #btn-sound { flex: 0.8; background: var(--card); border: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .btn.primary { background: var(--accent); color: var(--bg); }
+  .btn.stop { background: var(--danger); color: var(--bg); }
+  .btn.plain { background: var(--card); border: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .btn.small { height: 44px; }
+  .actions .btn { flex: 1; }
 
-  #history { display: flex; flex-direction: column; gap: 6px; }
-  #history .row {
-    display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px;
+  .rows { display: flex; flex-direction: column; gap: 6px; }
+  .rows .row {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px;
     background: var(--card); border-radius: 10px; font-variant-numeric: tabular-nums;
   }
-  #history .row b.nb { color: var(--danger); }
-  #history .row b.ok { color: var(--accent); }
-  #history .empty { color: var(--muted); font-size: 13px; }
+  .rows .row span { min-width: 0; }
+  .rows .row small { display: block; color: var(--muted); font-size: 12px; }
+  .rows .row b { flex: none; }
+  .rows .row b.nb { color: var(--danger); }
+  .rows .row b.ok { color: var(--accent); }
+  .rows .empty { color: var(--muted); font-size: 13px; }
+
+  #account {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); padding-top: 12px;
+  }
+  #account b { color: var(--text); }
+  #account div { min-width: 0; }
+
+  /* Full-screen views: sign-in and history */
+  .view {
+    position: fixed; inset: 0; z-index: 10; background: var(--bg); overflow-y: auto;
+    padding: calc(env(safe-area-inset-top, 0px) + 16px) calc(env(safe-area-inset-right, 0px) + 16px)
+             calc(env(safe-area-inset-bottom, 0px) + 16px) calc(env(safe-area-inset-left, 0px) + 16px);
+  }
+  .view-inner { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .view h1 { font-size: 22px; margin: 0; }
+  .view p { margin: 0; color: var(--muted); line-height: 1.5; }
+  .view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #login .view-inner { min-height: 100%; justify-content: center; }
+  #code {
+    width: 100%; min-height: 110px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--card); padding: 12px; font-size: 16px; resize: none;
+    -webkit-user-select: text; user-select: text; word-break: break-all;
+  }
+  #login-error { color: var(--danger); min-height: 1.5em; }
+  #summary {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; color: var(--text); line-height: 1.6;
+  }
 
   @media (orientation: landscape) {
-    body { flex-direction: row; }
+    #app { flex-direction: row; }
     #stage { flex: 1 1 62%; }
     #panel { flex: 0 0 38%; max-width: 380px; }
     #speed { font-size: 48px; }
@@ -106,58 +140,106 @@ const STYLE = String.raw`
 `;
 
 const BODY = String.raw`
-  <div id="stage">
-    <div id="frame">
-      <video id="video" playsinline muted autoplay></video>
-      <canvas id="overlay"></canvas>
-      <div id="hint">Drag the two lines onto the bowler's and the batsman's crease</div>
-    </div>
-    <div id="stage-msg">Starting camera…</div>
-  </div>
-
-  <div id="panel">
-    <div id="readout">
-      <div><span id="speed">--</span><span id="unit-label">km/h</span></div>
-      <div id="verdict">Waiting</div>
+  <div id="app" hidden>
+    <div id="stage">
+      <div id="frame">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <div id="hint">Drag the two lines onto the bowler's and the batsman's crease</div>
+      </div>
+      <div id="stage-msg">Starting camera…</div>
     </div>
 
-    <div id="status"><span id="dot"></span><span id="status-text">Starting camera…</span></div>
+    <div id="panel">
+      <div id="readout">
+        <div><span id="speed">--</span><span id="unit-label">km/h</span></div>
+        <div id="verdict">Waiting</div>
+      </div>
 
-    <div class="fields">
-      <div class="field">
-        <label for="limit" id="limit-label">Max speed (km/h)</label>
-        <input id="limit" type="number" inputmode="decimal" min="1" step="1">
-      </div>
-      <div class="field">
-        <label for="pitch">Bowler to batsman</label>
-        <select id="pitch">
-          <option value="standard">Standard pitch · 17.68 m</option>
-          <option value="custom">Other distance</option>
-        </select>
-      </div>
-      <div class="field">
-        <span class="label">Unit</span>
-        <div class="seg" role="group" aria-label="Speed unit">
-          <button id="unit-kmh" type="button" data-unit="km/h">km/h</button>
-          <button id="unit-mph" type="button" data-unit="mph">mph</button>
+      <div id="status"><span id="dot"></span><span id="status-text">Starting camera…</span></div>
+
+      <div class="fields">
+        <div class="field wide">
+          <label for="bowler">Bowler</label>
+          <div class="inline">
+            <select id="bowler"></select>
+            <button class="btn plain small" id="btn-add-bowler" type="button">Add</button>
+          </div>
+        </div>
+        <div class="field wide" id="bowler-add" hidden>
+          <label for="bowler-name">New bowler's name</label>
+          <div class="inline">
+            <input id="bowler-name" type="text" maxlength="30" autocomplete="off">
+            <button class="btn primary small" id="btn-save-bowler" type="button">Save</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="limit" id="limit-label">Max speed (km/h)</label>
+          <input id="limit" type="number" inputmode="decimal" min="1" step="1">
+        </div>
+        <div class="field">
+          <label for="pitch">Bowler to batsman</label>
+          <select id="pitch">
+            <option value="standard">Standard · 17.68 m</option>
+            <option value="custom">Other distance</option>
+          </select>
+        </div>
+        <div class="field wide" id="distance-field" hidden>
+          <label for="distance">Distance between the two lines (m)</label>
+          <input id="distance" type="number" inputmode="decimal" min="0.5" step="0.1">
+        </div>
+        <div class="field">
+          <span class="label">Unit</span>
+          <div class="seg" role="group" aria-label="Speed unit">
+            <button id="unit-kmh" type="button" data-unit="km/h">km/h</button>
+            <button id="unit-mph" type="button" data-unit="mph">mph</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="sens">Sensitivity</label>
+          <input id="sens" type="range" min="1" max="10" step="1">
         </div>
       </div>
+
+      <div class="actions">
+        <button class="btn plain" id="btn-sound" type="button">Test sound</button>
+        <button class="btn stop" id="btn-toggle" type="button">Pause</button>
+      </div>
+
+      <div class="rows" id="recent"></div>
+      <button class="btn plain" id="btn-history" type="button">Full history</button>
+
+      <div id="account">
+        <div><b id="account-name"></b><br><span id="account-until"></span></div>
+        <button class="btn plain small" id="btn-signout" type="button">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="login" hidden>
+    <div class="view-inner">
+      <h1>Ball Speed Detector</h1>
+      <p>Paste the access code or link you were given. Access lasts until the date set for your code.</p>
+      <textarea id="code" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Access code"></textarea>
+      <div id="login-error" role="alert"></div>
+      <button class="btn primary" id="btn-signin" type="button">Sign in</button>
+    </div>
+  </div>
+
+  <div class="view" id="history-view" hidden>
+    <div class="view-inner">
+      <div class="view-head">
+        <h1>History</h1>
+        <button class="btn plain small" id="btn-history-close" type="button">Close</button>
+      </div>
       <div class="field">
-        <label for="sens">Sensitivity</label>
-        <input id="sens" type="range" min="1" max="10" step="1">
+        <label for="history-bowler">Bowler</label>
+        <select id="history-bowler"></select>
       </div>
-      <div class="field wide" id="distance-field" hidden>
-        <label for="distance">Distance between the two lines (m)</label>
-        <input id="distance" type="number" inputmode="decimal" min="0.5" step="0.1">
-      </div>
+      <div id="summary"></div>
+      <div class="rows" id="history-rows"></div>
+      <button class="btn plain" id="btn-history-delete" type="button">Delete these records</button>
     </div>
-
-    <div class="actions">
-      <button class="btn" id="btn-sound" type="button">Test sound</button>
-      <button class="btn stop" id="btn-toggle" type="button">Pause</button>
-    </div>
-
-    <div id="history"><div class="empty">Deliveries will be listed here.</div></div>
   </div>
 `;
 
@@ -166,18 +248,35 @@ const APP_JS = String.raw`
   var UNITS = { 'km/h': 3.6, 'mph': 2.236936 };
   var PROC_MAX = 640;          // longest side of the frame the detector sees
   var KEY = 'ball-speed-settings-v2';
+  var RECORDS_KEY = 'ball-speed-records-v1';
+  var PASS_KEY = 'ball-speed-pass-v1';
+  var SEEN_KEY = 'ball-speed-seen-v1';
+  var MAX_RECORDS = 3000;
+
+  // Public half of the key that signs access codes (scripts/setup-access-keys.mjs writes this line).
+  var ACCESS_PUBLIC_KEY = {"kty":"EC","crv":"P-256","x":"t9fmBCVb1KmMOgj1zPPLzAWOyDN6nMVdzYRuq9_HpDY","y":"5Ptch8TjZSfx4Ra4bo8jo54CbIefay83M2vYmTsK_tw"}; // access-public-key
 
   // Popping crease to popping crease on a standard 22-yard pitch: the bowler
   // releases at one, the batsman stands at the other.
   var STANDARD_PITCH_M = 17.68;
 
-  var settings = { limit: 100, unit: 'km/h', pitch: 'standard', distance: 15, a: 0.1, b: 0.9, sens: 6 };
+  var settings = {
+    limit: 100, unit: 'km/h', pitch: 'standard', distance: 15, a: 0.1, b: 0.9, sens: 6,
+    bowlers: ['Bowler 1'], bowler: 'Bowler 1'
+  };
+  function readJson(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
+  function writeJson(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
+  var saved = readJson(KEY);
+  if (saved) for (var k in settings) if (saved[k] != null) settings[k] = saved[k];
+  if (!settings.bowlers.length) settings.bowlers = ['Bowler 1'];
+  if (settings.bowlers.indexOf(settings.bowler) < 0) settings.bowler = settings.bowlers[0];
+  function save() { writeJson(KEY, settings); }
   function lineDistance() { return settings.pitch === 'custom' ? settings.distance : STANDARD_PITCH_M; }
-  try {
-    var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (saved) for (var k in settings) if (saved[k] != null) settings[k] = saved[k];
-  } catch (e) {}
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} }
+
+  // Every delivery: { t: time (ms), b: bowler, mps: speed, lim: limit in m/s, nb: no ball }
+  var records = readJson(RECORDS_KEY);
+  if (!Array.isArray(records)) records = [];
+  function saveRecords() { writeJson(RECORDS_KEY, records); }
 
   var $ = function (id) { return document.getElementById(id); };
   var video = $('video'), overlay = $('overlay'), frameEl = $('frame'), stage = $('stage');
@@ -185,9 +284,14 @@ const APP_JS = String.raw`
   var proc = document.createElement('canvas');
   var pctx = proc.getContext('2d', { willReadFrequently: true });
 
-  var detector = null, running = true, cameraOk = false, busy = false;
+  var detector = null, running = true, cameraOk = false, busy = false, loopGen = 0;
   var lastT = -1, fps = 0, blobs = [], lastTrack = null, lastTrackAt = 0;
-  var history = [];
+  var session = null;
+
+  var pad = function (v) { return String(v).padStart(2, '0'); };
+  function fmtTime(ms) { var d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+  function fmtDate(ms) { return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); }
+  function fmtSpeed(mps) { return (mps * UNITS[settings.unit]).toFixed(1) + ' ' + settings.unit; }
 
   function speak(text) {
     if (window.ReactNativeWebView) {
@@ -216,6 +320,7 @@ const APP_JS = String.raw`
     var vw = video.videoWidth, vh = video.videoHeight;
     if (!vw || !vh) return;
     var sw = stage.clientWidth, sh = stage.clientHeight;
+    if (!sw || !sh) return;
     var scale = Math.min(sw / vw, sh / vh);
     var w = Math.floor(vw * scale), h = Math.floor(vh * scale);
     frameEl.style.width = w + 'px';
@@ -236,7 +341,7 @@ const APP_JS = String.raw`
   video.addEventListener('loadedmetadata', layout);
   video.addEventListener('resize', layout);
 
-  // ---------- overlay: calibration lines, detected ball ----------
+  // ---------- overlay: crease lines, detected ball ----------
   function drawOverlay() {
     var w = overlay.width, h = overlay.height;
     if (!w) return;
@@ -317,7 +422,17 @@ const APP_JS = String.raw`
     $('status-text').textContent = text;
     var btn = $('btn-toggle');
     btn.textContent = running ? 'Pause' : 'Start';
-    btn.className = 'btn' + (running ? ' stop' : '');
+    btn.className = 'btn ' + (running ? 'stop' : 'primary');
+  }
+
+  function fillSelect(select, values, labels, current) {
+    select.textContent = '';
+    values.forEach(function (v, i) {
+      var o = document.createElement('option');
+      o.value = v; o.textContent = labels ? labels[i] : v;
+      select.appendChild(o);
+    });
+    select.value = current;
   }
 
   function renderSettings() {
@@ -330,36 +445,43 @@ const APP_JS = String.raw`
     $('unit-label').textContent = settings.unit;
     $('unit-kmh').setAttribute('aria-pressed', String(settings.unit === 'km/h'));
     $('unit-mph').setAttribute('aria-pressed', String(settings.unit === 'mph'));
+    fillSelect($('bowler'), settings.bowlers, null, settings.bowler);
   }
 
-  function renderHistory() {
-    var box = $('history');
+  function recordRow(r, withDate) {
+    var row = document.createElement('div'); row.className = 'row';
+    var left = document.createElement('span');
+    left.textContent = r.b + ' · ' + fmtSpeed(r.mps);
+    var when = document.createElement('small');
+    when.textContent = (withDate ? fmtDate(r.t) + ', ' : '') + fmtTime(r.t) +
+      (withDate && r.lim ? ' · limit ' + fmtSpeed(r.lim) : '');
+    left.appendChild(when);
+    var right = document.createElement('b');
+    right.className = r.nb ? 'nb' : 'ok';
+    right.textContent = r.nb ? 'NO BALL' : 'Legal';
+    row.appendChild(left); row.appendChild(right);
+    return row;
+  }
+  function emptyRow(text) {
+    var empty = document.createElement('div');
+    empty.className = 'empty'; empty.textContent = text;
+    return empty;
+  }
+
+  function renderRecent() {
+    var box = $('recent');
     box.textContent = '';
-    if (!history.length) {
-      var empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = 'Deliveries will be listed here.';
-      box.appendChild(empty);
-      return;
-    }
-    history.forEach(function (d) {
-      var row = document.createElement('div'); row.className = 'row';
-      var left = document.createElement('span');
-      left.textContent = d.time + '  ·  ' + (d.mps * UNITS[settings.unit]).toFixed(1) + ' ' + settings.unit;
-      var right = document.createElement('b');
-      right.className = d.noBall ? 'nb' : 'ok';
-      right.textContent = d.noBall ? 'NO BALL' : 'Legal';
-      row.appendChild(left); row.appendChild(right);
-      box.appendChild(row);
-    });
+    if (!records.length) { box.appendChild(emptyRow('Deliveries will be listed here.')); return; }
+    records.slice(0, 5).forEach(function (r) { box.appendChild(recordRow(r, false)); });
   }
 
+  var shownRecord = null; // the delivery on the big readout (this session only)
   function renderLast() {
-    var d = history[0];
-    $('readout').className = d && d.noBall ? 'noball' : '';
+    var d = shownRecord;
+    $('readout').className = d && d.nb ? 'noball' : '';
     $('speed').textContent = d ? (d.mps * UNITS[settings.unit]).toFixed(1) : '--';
-    $('verdict').className = d && !d.noBall ? 'legal' : '';
-    $('verdict').textContent = d ? (d.noBall ? 'NO BALL' : 'Legal') : 'Waiting';
+    $('verdict').className = d && !d.nb ? 'legal' : '';
+    $('verdict').textContent = d ? (d.nb ? 'NO BALL' : 'Legal') : 'Waiting';
   }
 
   function onDelivery(event) {
@@ -367,25 +489,85 @@ const APP_JS = String.raw`
     var metres = lineDistance();
     if (gapPx < 8 || !(metres > 0)) return;
     var mps = event.pxPerSec * metres / gapPx;
-    var shown = mps * UNITS[settings.unit];
-    var noBall = shown > settings.limit;
-    var now = new Date();
-    var pad = function (v) { return String(v).padStart(2, '0'); };
-    history.unshift({
-      mps: mps, noBall: noBall,
-      time: pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds())
-    });
-    if (history.length > 8) history.pop();
+    var limitMps = settings.limit / UNITS[settings.unit];
+    var record = { t: Date.now(), b: settings.bowler, mps: mps, lim: limitMps, nb: mps > limitMps };
+    records.unshift(record);
+    if (records.length > MAX_RECORDS) records.length = MAX_RECORDS;
+    saveRecords();
+    shownRecord = record;
     lastTrack = event.points; lastTrackAt = performance.now();
-    if (noBall) speak('No ball');
-    renderLast(); renderHistory();
+    if (record.nb) speak('No ball');
+    renderLast(); renderRecent();
   }
+
+  // ---------- history view ----------
+  var ALL = '__all__';
+  var historyFilter = ALL;
+  function filteredRecords() {
+    return historyFilter === ALL ? records : records.filter(function (r) { return r.b === historyFilter; });
+  }
+  function renderHistoryView() {
+    var names = settings.bowlers.slice();
+    records.forEach(function (r) { if (names.indexOf(r.b) < 0) names.push(r.b); });
+    if (historyFilter !== ALL && names.indexOf(historyFilter) < 0) historyFilter = ALL;
+    fillSelect($('history-bowler'), [ALL].concat(names), ['All bowlers'].concat(names), historyFilter);
+
+    var list = filteredRecords();
+    var summary = $('summary');
+    if (!list.length) {
+      summary.textContent = 'No deliveries recorded yet.';
+    } else {
+      var fastest = 0, total = 0, noBalls = 0;
+      list.forEach(function (r) { if (r.mps > fastest) fastest = r.mps; total += r.mps; if (r.nb) noBalls++; });
+      summary.textContent = '';
+      [
+        list.length + (list.length === 1 ? ' delivery' : ' deliveries'),
+        'Fastest ' + fmtSpeed(fastest),
+        'Average ' + fmtSpeed(total / list.length),
+        noBalls + (noBalls === 1 ? ' no ball' : ' no balls')
+      ].forEach(function (line) {
+        var d = document.createElement('div'); d.textContent = line; summary.appendChild(d);
+      });
+    }
+
+    var box = $('history-rows');
+    box.textContent = '';
+    list.slice(0, 500).forEach(function (r) { box.appendChild(recordRow(r, true)); });
+    if (list.length > 500) box.appendChild(emptyRow('Showing the latest 500 of ' + list.length + '.'));
+    var del = $('btn-history-delete');
+    del.hidden = !list.length;
+    del.textContent = 'Delete these records';
+    del.className = 'btn plain';
+    deleteArmed = false;
+  }
+  var deleteArmed = false;
+  $('btn-history').addEventListener('click', function () {
+    historyFilter = ALL;
+    renderHistoryView();
+    $('history-view').hidden = false;
+  });
+  $('btn-history-close').addEventListener('click', function () { $('history-view').hidden = true; });
+  $('history-bowler').addEventListener('change', function () { historyFilter = this.value; renderHistoryView(); });
+  $('btn-history-delete').addEventListener('click', function () {
+    if (!deleteArmed) {
+      // Two taps, so records are not lost to a slip of the thumb.
+      deleteArmed = true;
+      this.textContent = 'Tap again to delete ' + filteredRecords().length + ' records for good';
+      this.className = 'btn stop';
+      return;
+    }
+    records = historyFilter === ALL ? [] : records.filter(function (r) { return r.b !== historyFilter; });
+    saveRecords();
+    if (shownRecord && records.indexOf(shownRecord) < 0) shownRecord = null;
+    renderHistoryView(); renderRecent(); renderLast();
+  });
 
   // ---------- frame loop ----------
   function threshold() { return 46 - settings.sens * 4; } // sensitivity 1..10 -> 42..6
 
-  function onFrame(now, meta) {
-    schedule();
+  function onFrame(gen, now, meta) {
+    if (gen !== loopGen) return;
+    schedule(gen);
     if (!cameraOk || !running || !detector || video.readyState < 2) return;
     var t = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : now / 1000;
     if (t <= lastT) return;
@@ -402,9 +584,9 @@ const APP_JS = String.raw`
     if (r.event) onDelivery(r.event);
     drawOverlay();
   }
-  function schedule() {
-    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
-    else requestAnimationFrame(function (now) { onFrame(now, null); });
+  function schedule(gen) {
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(function (now, meta) { onFrame(gen, now, meta); });
+    else requestAnimationFrame(function (now) { onFrame(gen, now, null); });
   }
   setInterval(function () { if (cameraOk && running && !busy) renderStatus(); }, 1000);
 
@@ -429,9 +611,32 @@ const APP_JS = String.raw`
       // Keep the limit meaning the same real speed when the unit changes.
       settings.limit = Math.round(settings.limit / UNITS[settings.unit] * UNITS[next]);
       settings.unit = next;
-      save(); renderSettings(); renderLast(); renderHistory();
+      save(); renderSettings(); renderLast(); renderRecent();
     });
   });
+  $('bowler').addEventListener('change', function () { settings.bowler = this.value; save(); });
+  $('btn-add-bowler').addEventListener('click', function () {
+    var box = $('bowler-add');
+    box.hidden = !box.hidden;
+    if (!box.hidden) { $('bowler-name').value = ''; $('bowler-name').focus(); }
+  });
+  function saveBowler() {
+    var name = $('bowler-name').value.replace(/\s+/g, ' ').trim();
+    if (!name) return;
+    var existing = settings.bowlers.filter(function (b) { return b.toLowerCase() === name.toLowerCase(); })[0];
+    if (!existing) {
+      // The starter name is only a placeholder until a real bowler is added.
+      var starterUnused = settings.bowlers.length === 1 && settings.bowlers[0] === 'Bowler 1' &&
+        !records.some(function (r) { return r.b === 'Bowler 1'; });
+      if (starterUnused) settings.bowlers = [];
+      settings.bowlers.push(name);
+    }
+    settings.bowler = existing || name;
+    save(); renderSettings();
+    $('bowler-add').hidden = true;
+  }
+  $('btn-save-bowler').addEventListener('click', saveBowler);
+  $('bowler-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveBowler(); });
   $('btn-toggle').addEventListener('click', function () {
     running = !running;
     blobs = []; lastT = -1; fps = 0;
@@ -449,11 +654,24 @@ const APP_JS = String.raw`
     renderStatus();
   }
 
+  function stopCamera() {
+    loopGen++;
+    cameraOk = false; blobs = []; lastT = -1; fps = 0;
+    var stream = video.srcObject;
+    if (stream && stream.getTracks) stream.getTracks().forEach(function (t) { t.stop(); });
+    video.srcObject = null;
+  }
+
   function startCamera() {
+    $('stage-msg').hidden = false;
+    $('stage-msg').textContent = 'Starting camera…';
+    frameEl.hidden = true;
+    renderStatus();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       cameraError('This device does not give the app access to the camera.');
       return;
     }
+    var gen = ++loopGen;
     navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
@@ -462,14 +680,18 @@ const APP_JS = String.raw`
         frameRate: { ideal: 60 }
       }
     }).then(function (stream) {
+      if (gen !== loopGen) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
       video.srcObject = stream;
-      return video.play();
-    }).then(function () {
-      cameraOk = true;
-      $('stage-msg').hidden = true;
-      frameEl.hidden = false;
-      layout(); renderStatus(); schedule();
+      return video.play().then(function () {
+        if (gen !== loopGen) return;
+        cameraOk = true;
+        if (detector) detector.reset();
+        $('stage-msg').hidden = true;
+        frameEl.hidden = false;
+        layout(); renderStatus(); schedule(gen);
+      });
     }).catch(function (err) {
+      if (gen !== loopGen) return;
       var denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
       cameraError(denied
         ? 'Camera permission was refused. Allow camera access for this app in your phone settings, then reopen it.'
@@ -477,9 +699,116 @@ const APP_JS = String.raw`
     });
   }
 
+  // ---------- sign-in: time-limited access codes ----------
+  // A code is "<payload>.<signature>". The payload is { n: name, e: expiry (seconds) },
+  // signed with a private key that only the app's owner holds. The page can check
+  // a code with the public key above but cannot create one.
+  function b64uToBytes(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function verifyPass(token) {
+    var parts = String(token).split('.');
+    if (parts.length !== 2 || !ACCESS_PUBLIC_KEY) return Promise.resolve(null);
+    var payload, sig;
+    try { payload = b64uToBytes(parts[0]); sig = b64uToBytes(parts[1]); } catch (e) { return Promise.resolve(null); }
+    return crypto.subtle.importKey('jwk', ACCESS_PUBLIC_KEY, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
+      .then(function (key) { return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, payload); })
+      .then(function (ok) {
+        if (!ok) return null;
+        var p = JSON.parse(new TextDecoder().decode(payload));
+        return p && typeof p.n === 'string' && typeof p.e === 'number' ? p : null;
+      })
+      .catch(function () { return null; });
+  }
+  // The latest time this device has shown, so winding the clock back does not extend access.
+  function nowMs() {
+    var n = Date.now(), seen = 0;
+    try { seen = parseInt(localStorage.getItem(SEEN_KEY) || '0', 10) || 0; } catch (e) {}
+    if (n > seen) { try { localStorage.setItem(SEEN_KEY, String(n)); } catch (e) {} return n; }
+    return seen;
+  }
+  function forgetPass() { try { localStorage.removeItem(PASS_KEY); } catch (e) {} }
+
+  function showLogin(message) {
+    session = null;
+    stopCamera();
+    $('history-view').hidden = true;
+    $('app').hidden = true;
+    $('login').hidden = false;
+    $('login-error').textContent = message || '';
+  }
+  function enter(pass, token) {
+    session = pass;
+    try { localStorage.setItem(PASS_KEY, token); } catch (e) {}
+    $('code').value = '';
+    $('login').hidden = true;
+    $('app').hidden = false;
+    $('account-name').textContent = pass.n;
+    $('account-until').textContent = 'Access until ' + fmtDate(pass.e * 1000) + ', ' + fmtTime(pass.e * 1000).slice(0, 5);
+    startCamera();
+  }
+  // fallback: a code already saved on this device, tried if this one is no good
+  // (so opening an old link does not sign out someone whose access is still valid).
+  function tryToken(token, typed, fallback) {
+    if (!window.crypto || !crypto.subtle) {
+      showLogin('This browser cannot check access codes. Open the page in Safari or Chrome.');
+      return;
+    }
+    verifyPass(token).then(function (pass) {
+      var live = pass && pass.e * 1000 > nowMs();
+      if (!live && fallback && fallback !== token) { tryToken(fallback, false); return; }
+      if (!pass) {
+        showLogin(typed ? 'That access code is not valid. Check that you copied all of it.' : '');
+        return;
+      }
+      if (!live) {
+        var stored = null;
+        try { stored = localStorage.getItem(PASS_KEY); } catch (e) {}
+        if (stored === token) forgetPass();
+        showLogin('Access for ' + pass.n + ' ended on ' + fmtDate(pass.e * 1000) + '. Ask for a new code.');
+        return;
+      }
+      enter(pass, token);
+    });
+  }
+  function tokenFromText(text) {
+    var m = /[#?&]k=([A-Za-z0-9_.-]+)/.exec(text);
+    return m ? m[1] : text.replace(/\s+/g, '');
+  }
+  $('btn-signin').addEventListener('click', function () {
+    var token = tokenFromText($('code').value);
+    if (!token) { $('login-error').textContent = 'Paste your access code first.'; return; }
+    tryToken(token, true);
+  });
+  $('btn-signout').addEventListener('click', function () { forgetPass(); showLogin(''); });
+  setInterval(function () {
+    if (session && session.e * 1000 <= nowMs()) {
+      var ended = session;
+      forgetPass();
+      showLogin('Access for ' + ended.n + ' ended on ' + fmtDate(ended.e * 1000) + '. Ask for a new code.');
+    }
+  }, 30000);
+
+  // ---------- start ----------
   frameEl.hidden = true;
-  renderSettings(); renderLast(); renderHistory(); renderStatus();
-  startCamera();
+  renderSettings(); renderLast(); renderRecent(); renderStatus();
+
+  var linkToken = null;
+  var hashMatch = /[#&]k=([A-Za-z0-9_.-]+)/.exec(location.hash || '');
+  if (hashMatch) {
+    linkToken = hashMatch[1];
+    // Take the code out of the address bar so it is not shared by accident.
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  }
+  var storedToken = null;
+  try { storedToken = localStorage.getItem(PASS_KEY); } catch (e) {}
+  if (linkToken) tryToken(linkToken, true, storedToken);
+  else if (storedToken) tryToken(storedToken, false);
+  else showLogin('');
 })();
 `;
 
