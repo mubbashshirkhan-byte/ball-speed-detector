@@ -6,7 +6,7 @@ Measures the speed of a bowled ball with the phone camera and calls "No ball" al
 
 1. Stand the phone side-on to the pitch and keep it still (a tripod helps). Landscape gives the widest view.
 2. Allow camera access.
-3. Drag the yellow lines **A** and **B** onto two marks on the pitch, and enter the real distance between them in metres.
+3. Drag the two yellow lines onto the bowler's crease and the batsman's crease. The distance is set automatically to a standard pitch (17.68 m between the popping creases). For a shorter or longer pitch, choose **Other distance** and enter it.
 4. Enter the maximum allowed speed.
 5. Bowl. The speed appears with **Legal** or **NO BALL**; over the limit the phone says "No ball".
 
