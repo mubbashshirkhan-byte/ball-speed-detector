@@ -54,6 +54,7 @@
   #dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   #dot.live { background: var(--accent); }
   #dot.problem { background: var(--danger); }
+  #diag { color: var(--muted); font-size: 12px; margin-top: -6px; min-height: 1.3em; }
 
   .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -131,6 +132,7 @@
       </div>
 
       <div id="status"><span id="dot"></span><span id="status-text">Starting camera…</span></div>
+      <div id="diag"></div>
 
       <div class="fields">
         <div class="field wide">
@@ -221,10 +223,12 @@ function createDetector(width, height) {
   var pending = null;
 
   var MIN_AREA = 3;
-  var MAX_BLOB_W = Math.round(width * 0.16);            // allows for motion-blur streaks
+  var MAX_BLOB_W = Math.round(width * 0.3);             // allows for long motion-blur streaks
   var MAX_BLOB_H = Math.max(10, Math.round(height * 0.1));
   var MIN_V = width * 0.25;                             // px/s; slower things are not a bowled ball
-  var MAX_V = width * 8;
+  var MAX_V = width * 20;                               // faster than this cannot be seen in 3 frames anyway
+  var largeCount = 0;                                   // moving things too big to be a ball, this frame
+  var lastMiss = null;                                  // why the latest ball-like movement gave no reading
   var EXPIRE_S = 0.18;                                  // a track ends after this long unseen
   var COOLDOWN_S = 1.0;                                 // one reading per delivery
   var MIN_POINTS = 3;
@@ -288,6 +292,7 @@ function createDetector(width, height) {
 
   function findBlobs(x0, x1) {
     var blobs = [];
+    largeCount = 0;
     for (var y = 0; y < height; y++) {
       for (var x = x0; x < x1; x++) {
         var start = y * width + x;
@@ -312,8 +317,9 @@ function createDetector(width, height) {
             }
           }
         }
-        if (area >= MIN_AREA && (maxX - minX + 1) <= MAX_BLOB_W && (maxY - minY + 1) <= MAX_BLOB_H
-            && blobs.length < MAX_BLOBS) {
+        if (area < MIN_AREA) continue;
+        if ((maxX - minX + 1) > MAX_BLOB_W || (maxY - minY + 1) > MAX_BLOB_H) { largeCount++; continue; }
+        if (blobs.length < MAX_BLOBS) {
           blobs.push({ x: sumX / area, y: sumY / area, area: area, w: maxX - minX + 1, h: maxY - minY + 1 });
         }
       }
@@ -323,6 +329,8 @@ function createDetector(width, height) {
 
   function updateTracks(blobs, t) {
     var i, k;
+    // "Quiet" = nothing else is moving, so a small fast thing is very likely the ball.
+    var quiet = largeCount === 0 && blobs.length <= 3;
     for (k = 0; k < tracks.length; k++) {
       var tr = tracks[k];
       var last = tr.pts[tr.pts.length - 1];
@@ -348,13 +356,14 @@ function createDetector(width, height) {
       if (best >= 0) {
         tr.vx = tr.pts.length === 1 ? bestV : tr.vx * 0.5 + bestV * 0.5;
         tr.pts.push({ t: t, x: blobs[best].x, y: blobs[best].y, w: blobs[best].w, h: blobs[best].h });
+        if (!quiet) tr.quiet = false;
         blobs[best].linked = true;
       }
     }
     // Any blob that did not continue a track may be the start of one.
     for (i = 0; i < blobs.length; i++) {
       if (!blobs[i].linked) {
-        tracks.push({ pts: [{ t: t, x: blobs[i].x, y: blobs[i].y, w: blobs[i].w, h: blobs[i].h }], vx: 0 });
+        tracks.push({ pts: [{ t: t, x: blobs[i].x, y: blobs[i].y, w: blobs[i].w, h: blobs[i].h }], vx: 0, quiet: quiet });
       }
     }
     if (tracks.length > MAX_TRACKS) {
@@ -369,11 +378,12 @@ function createDetector(width, height) {
       var tr = tracks[k];
       var pts = tr.pts;
       if (t - pts[pts.length - 1].t <= EXPIRE_S) { alive.push(tr); continue; }
-      if (pts.length < MIN_POINTS) continue;
+      // Misses are only reported for quiet scenes, where the movement was very likely the ball.
+      if (pts.length < MIN_POINTS) { if (pts.length === 2 && tr.quiet) lastMiss = 'few'; continue; }
       var span = pts[pts.length - 1].x - pts[0].x; if (span < 0) span = -span;
-      if (span < roiW * 0.2) continue;
+      if (span < roiW * 0.2) { if (tr.quiet) lastMiss = 'short'; continue; }
       var f = fit(pts);
-      if (!f || f.inliers < MIN_POINTS || f.inliers < f.count * 0.7) continue;
+      if (!f || f.inliers < MIN_POINTS || f.inliers < f.count * 0.7) { if (tr.quiet) lastMiss = 'unsteady'; continue; }
       if (!pending || f.inliers > pending.inliers) {
         pending = {
           pxPerSec: f.slope < 0 ? -f.slope : f.slope,
@@ -439,7 +449,9 @@ function createDetector(width, height) {
 
     var blobs = findBlobs(x0, x1);
     result.blobs = blobs;
+    result.large = largeCount;
     if (t < cooldownUntil) { tracks = []; return result; }
+    lastMiss = null;
 
     updateTracks(blobs, t);
     var event = collectFinished(t, roiW);
@@ -447,6 +459,8 @@ function createDetector(width, height) {
       result.event = event;
       cooldownUntil = t + COOLDOWN_S;
       tracks = [];
+    } else if (lastMiss && !pending) {
+      result.miss = lastMiss;   // 'few' | 'short' | 'unsteady'
     }
     return result;
   }
@@ -456,6 +470,7 @@ function createDetector(width, height) {
 </script><script>
 (function () {
   var UNITS = { 'km/h': 3.6, 'mph': 2.236936 };
+  var VERSION = 8;             // shown on screen, to tell which build a phone is running
   var PROC_MAX = 960;          // longest side of the frame the detector sees
   var KEY = 'ball-speed-settings-v3';
   var BALL_M = { cricket: 0.072, tennis: 0.067 };  // ball diameters in metres
@@ -696,6 +711,13 @@ function createDetector(width, height) {
   }
 
   var note = '', noteUntil = 0; // a short-lived message on the status line
+  var useMediaTime = true, lastMediaTime = -1, stuckFrames = 0;
+  var framesSeen = 0, smallSeen = 0, largeSeen = 0, busySeen = false; // for the diagnostics line
+  var MISS_TEXT = {
+    few: 'Something crossed too fast to measure (seen in only 2 frames). Move the phone further back.',
+    short: 'Movement seen, but it did not travel far enough across the picture.',
+    unsteady: 'Movement seen, but not along a steady path. Try again.'
+  };
   var shownRecord = null; // the delivery on the big readout (this session only)
   function renderLast() {
     var d = shownRecord;
@@ -804,7 +826,16 @@ function createDetector(width, height) {
     if (gen !== loopGen) return;
     schedule(gen);
     if (!cameraOk || !running || !detector || video.readyState < 2) return;
-    var t = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : now / 1000;
+    // Frame time: the camera's own timestamp is the most exact, but some browsers
+    // do not advance it for a live camera. If it stands still, use the clock instead.
+    var t = now / 1000;
+    if (useMediaTime && meta && typeof meta.mediaTime === 'number') {
+      if (meta.mediaTime > lastMediaTime) { lastMediaTime = meta.mediaTime; stuckFrames = 0; t = meta.mediaTime; }
+      else if (++stuckFrames >= 5) { useMediaTime = false; lastT = -1; fps = 0; detector.reset(); }
+      else return;
+    } else {
+      useMediaTime = false;
+    }
     if (t <= lastT) return;
     if (lastT >= 0) {
       var inst = 1 / (t - lastT);
@@ -816,15 +847,39 @@ function createDetector(width, height) {
     var auto = isAuto();
     var r = detector.process(img.data, t, auto ? 0 : settings.a * proc.width, auto ? proc.width : settings.b * proc.width, threshold());
     blobs = r.blobs;
+    framesSeen++;
+    if (r.blobs.length) smallSeen = r.blobs.length;
+    if (r.large) largeSeen = r.large;
+    if (r.busy) busySeen = true;
     if (r.busy !== busy) { busy = r.busy; renderStatus(); }
     if (r.event) onDelivery(r.event);
+    else if (r.miss) {
+      note = MISS_TEXT[r.miss] || '';
+      noteUntil = performance.now() + 6000;
+      renderStatus();
+    }
     drawOverlay();
   }
   function schedule(gen) {
     if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(function (now, meta) { onFrame(gen, now, meta); });
     else requestAnimationFrame(function (now) { onFrame(gen, now, null); });
   }
-  setInterval(function () { if (cameraOk && running && !busy) renderStatus(); }, 1000);
+  // Once a second: refresh the status and the "what the camera sees" line.
+  setInterval(function () {
+    if (cameraOk && running && !busy) renderStatus();
+    var text = 'Version ' + VERSION;
+    if (cameraOk) {
+      text += ' · camera ' + video.videoWidth + '×' + video.videoHeight +
+        ' · ' + (useMediaTime ? 'camera clock' : 'device clock');
+      if (running) {
+        text += framesSeen
+          ? ' · moving now: ' + (busySeen ? 'the whole picture' : smallSeen + ' small, ' + largeSeen + ' large')
+          : ' · no frames arriving';
+      }
+    }
+    $('diag').textContent = text;
+    framesSeen = 0; smallSeen = 0; largeSeen = 0; busySeen = false;
+  }, 1000);
 
   // ---------- controls ----------
   $('limit').addEventListener('change', function () {
