@@ -26,10 +26,12 @@ function createDetector(width, height) {
   var pending = null;
 
   var MIN_AREA = 3;
-  var MAX_BLOB_W = Math.round(width * 0.16);            // allows for motion-blur streaks
+  var MAX_BLOB_W = Math.round(width * 0.3);             // allows for long motion-blur streaks
   var MAX_BLOB_H = Math.max(10, Math.round(height * 0.1));
   var MIN_V = width * 0.25;                             // px/s; slower things are not a bowled ball
-  var MAX_V = width * 8;
+  var MAX_V = width * 20;                               // faster than this cannot be seen in 3 frames anyway
+  var largeCount = 0;                                   // moving things too big to be a ball, this frame
+  var lastMiss = null;                                  // why the latest ball-like movement gave no reading
   var EXPIRE_S = 0.18;                                  // a track ends after this long unseen
   var COOLDOWN_S = 1.0;                                 // one reading per delivery
   var MIN_POINTS = 3;
@@ -93,6 +95,7 @@ function createDetector(width, height) {
 
   function findBlobs(x0, x1) {
     var blobs = [];
+    largeCount = 0;
     for (var y = 0; y < height; y++) {
       for (var x = x0; x < x1; x++) {
         var start = y * width + x;
@@ -117,8 +120,9 @@ function createDetector(width, height) {
             }
           }
         }
-        if (area >= MIN_AREA && (maxX - minX + 1) <= MAX_BLOB_W && (maxY - minY + 1) <= MAX_BLOB_H
-            && blobs.length < MAX_BLOBS) {
+        if (area < MIN_AREA) continue;
+        if ((maxX - minX + 1) > MAX_BLOB_W || (maxY - minY + 1) > MAX_BLOB_H) { largeCount++; continue; }
+        if (blobs.length < MAX_BLOBS) {
           blobs.push({ x: sumX / area, y: sumY / area, area: area, w: maxX - minX + 1, h: maxY - minY + 1 });
         }
       }
@@ -128,6 +132,8 @@ function createDetector(width, height) {
 
   function updateTracks(blobs, t) {
     var i, k;
+    // "Quiet" = nothing else is moving, so a small fast thing is very likely the ball.
+    var quiet = largeCount === 0 && blobs.length <= 3;
     for (k = 0; k < tracks.length; k++) {
       var tr = tracks[k];
       var last = tr.pts[tr.pts.length - 1];
@@ -153,13 +159,14 @@ function createDetector(width, height) {
       if (best >= 0) {
         tr.vx = tr.pts.length === 1 ? bestV : tr.vx * 0.5 + bestV * 0.5;
         tr.pts.push({ t: t, x: blobs[best].x, y: blobs[best].y, w: blobs[best].w, h: blobs[best].h });
+        if (!quiet) tr.quiet = false;
         blobs[best].linked = true;
       }
     }
     // Any blob that did not continue a track may be the start of one.
     for (i = 0; i < blobs.length; i++) {
       if (!blobs[i].linked) {
-        tracks.push({ pts: [{ t: t, x: blobs[i].x, y: blobs[i].y, w: blobs[i].w, h: blobs[i].h }], vx: 0 });
+        tracks.push({ pts: [{ t: t, x: blobs[i].x, y: blobs[i].y, w: blobs[i].w, h: blobs[i].h }], vx: 0, quiet: quiet });
       }
     }
     if (tracks.length > MAX_TRACKS) {
@@ -174,11 +181,12 @@ function createDetector(width, height) {
       var tr = tracks[k];
       var pts = tr.pts;
       if (t - pts[pts.length - 1].t <= EXPIRE_S) { alive.push(tr); continue; }
-      if (pts.length < MIN_POINTS) continue;
+      // Misses are only reported for quiet scenes, where the movement was very likely the ball.
+      if (pts.length < MIN_POINTS) { if (pts.length === 2 && tr.quiet) lastMiss = 'few'; continue; }
       var span = pts[pts.length - 1].x - pts[0].x; if (span < 0) span = -span;
-      if (span < roiW * 0.2) continue;
+      if (span < roiW * 0.2) { if (tr.quiet) lastMiss = 'short'; continue; }
       var f = fit(pts);
-      if (!f || f.inliers < MIN_POINTS || f.inliers < f.count * 0.7) continue;
+      if (!f || f.inliers < MIN_POINTS || f.inliers < f.count * 0.7) { if (tr.quiet) lastMiss = 'unsteady'; continue; }
       if (!pending || f.inliers > pending.inliers) {
         pending = {
           pxPerSec: f.slope < 0 ? -f.slope : f.slope,
@@ -244,7 +252,9 @@ function createDetector(width, height) {
 
     var blobs = findBlobs(x0, x1);
     result.blobs = blobs;
+    result.large = largeCount;
     if (t < cooldownUntil) { tracks = []; return result; }
+    lastMiss = null;
 
     updateTracks(blobs, t);
     var event = collectFinished(t, roiW);
@@ -252,6 +262,8 @@ function createDetector(width, height) {
       result.event = event;
       cooldownUntil = t + COOLDOWN_S;
       tracks = [];
+    } else if (lastMiss && !pending) {
+      result.miss = lastMiss;   // 'few' | 'short' | 'unsteady'
     }
     return result;
   }

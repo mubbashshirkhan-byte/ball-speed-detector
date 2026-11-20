@@ -64,6 +64,7 @@ const STYLE = String.raw`
   #dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   #dot.live { background: var(--accent); }
   #dot.problem { background: var(--danger); }
+  #diag { color: var(--muted); font-size: 12px; margin-top: -6px; min-height: 1.3em; }
 
   .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -143,6 +144,7 @@ const BODY = String.raw`
       </div>
 
       <div id="status"><span id="dot"></span><span id="status-text">Starting camera…</span></div>
+      <div id="diag"></div>
 
       <div class="fields">
         <div class="field wide">
@@ -226,6 +228,7 @@ const BODY = String.raw`
 const APP_JS = String.raw`
 (function () {
   var UNITS = { 'km/h': 3.6, 'mph': 2.236936 };
+  var VERSION = 8;             // shown on screen, to tell which build a phone is running
   var PROC_MAX = 960;          // longest side of the frame the detector sees
   var KEY = 'ball-speed-settings-v3';
   var BALL_M = { cricket: 0.072, tennis: 0.067 };  // ball diameters in metres
@@ -466,6 +469,13 @@ const APP_JS = String.raw`
   }
 
   var note = '', noteUntil = 0; // a short-lived message on the status line
+  var useMediaTime = true, lastMediaTime = -1, stuckFrames = 0;
+  var framesSeen = 0, smallSeen = 0, largeSeen = 0, busySeen = false; // for the diagnostics line
+  var MISS_TEXT = {
+    few: 'Something crossed too fast to measure (seen in only 2 frames). Move the phone further back.',
+    short: 'Movement seen, but it did not travel far enough across the picture.',
+    unsteady: 'Movement seen, but not along a steady path. Try again.'
+  };
   var shownRecord = null; // the delivery on the big readout (this session only)
   function renderLast() {
     var d = shownRecord;
@@ -574,7 +584,16 @@ const APP_JS = String.raw`
     if (gen !== loopGen) return;
     schedule(gen);
     if (!cameraOk || !running || !detector || video.readyState < 2) return;
-    var t = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : now / 1000;
+    // Frame time: the camera's own timestamp is the most exact, but some browsers
+    // do not advance it for a live camera. If it stands still, use the clock instead.
+    var t = now / 1000;
+    if (useMediaTime && meta && typeof meta.mediaTime === 'number') {
+      if (meta.mediaTime > lastMediaTime) { lastMediaTime = meta.mediaTime; stuckFrames = 0; t = meta.mediaTime; }
+      else if (++stuckFrames >= 5) { useMediaTime = false; lastT = -1; fps = 0; detector.reset(); }
+      else return;
+    } else {
+      useMediaTime = false;
+    }
     if (t <= lastT) return;
     if (lastT >= 0) {
       var inst = 1 / (t - lastT);
@@ -586,15 +605,39 @@ const APP_JS = String.raw`
     var auto = isAuto();
     var r = detector.process(img.data, t, auto ? 0 : settings.a * proc.width, auto ? proc.width : settings.b * proc.width, threshold());
     blobs = r.blobs;
+    framesSeen++;
+    if (r.blobs.length) smallSeen = r.blobs.length;
+    if (r.large) largeSeen = r.large;
+    if (r.busy) busySeen = true;
     if (r.busy !== busy) { busy = r.busy; renderStatus(); }
     if (r.event) onDelivery(r.event);
+    else if (r.miss) {
+      note = MISS_TEXT[r.miss] || '';
+      noteUntil = performance.now() + 6000;
+      renderStatus();
+    }
     drawOverlay();
   }
   function schedule(gen) {
     if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(function (now, meta) { onFrame(gen, now, meta); });
     else requestAnimationFrame(function (now) { onFrame(gen, now, null); });
   }
-  setInterval(function () { if (cameraOk && running && !busy) renderStatus(); }, 1000);
+  // Once a second: refresh the status and the "what the camera sees" line.
+  setInterval(function () {
+    if (cameraOk && running && !busy) renderStatus();
+    var text = 'Version ' + VERSION;
+    if (cameraOk) {
+      text += ' · camera ' + video.videoWidth + '×' + video.videoHeight +
+        ' · ' + (useMediaTime ? 'camera clock' : 'device clock');
+      if (running) {
+        text += framesSeen
+          ? ' · moving now: ' + (busySeen ? 'the whole picture' : smallSeen + ' small, ' + largeSeen + ' large')
+          : ' · no frames arriving';
+      }
+    }
+    $('diag').textContent = text;
+    framesSeen = 0; smallSeen = 0; largeSeen = 0; busySeen = false;
+  }, 1000);
 
   // ---------- controls ----------
   $('limit').addEventListener('change', function () {

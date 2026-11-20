@@ -62,15 +62,17 @@ function run(c) {
       const x = (direction > 0 ? W * 0.05 : W * 0.95) + direction * v * dt;
       const bounceT = bounceX / v;
       // Falls, bounces, rises again.
-      const fall = H * 0.45;
-      const y = dt < bounceT ? H * 0.33 + fall * (dt / bounceT) ** 2 : H * 0.78 - H * 0.85 * (dt - bounceT);
-      const vy = dt < bounceT ? (2 * fall * dt) / bounceT ** 2 : -H * 0.85;
+      const fall = W * 0.25;
+      const rise = W * 0.48;
+      const y = dt < bounceT ? H * 0.33 + fall * (dt / bounceT) ** 2 : H * 0.33 + fall - rise * (dt - bounceT);
+      const vy = dt < bounceT ? (2 * fall * dt) / bounceT ** 2 : -rise;
       if (x > 0 && x < W && y > 0 && y < H) ball = { x, y, vx: direction * v, vy, d, exposure };
     }
     // A bowler following through: big, slow, jittery.
     const person = withPerson ? { x: W * 0.17 + 60 * t + Math.sin(t * 20) * 3, y: H * 0.7 } : null;
     const r = det.process(frame({ ball, person }), t, x0, x1, 22);
     if (r.event) events.push(r.event);
+    if (r.miss) events.miss = r.miss;
   }
   return events;
 }
@@ -88,6 +90,8 @@ const cases = [
   { name: 'auto: fast ball, 4 frames in view', W: 960, H: 540, fps: 30, v: 6500, d: 20, exposure: 1 / 500, lines: false, size: true },
   { name: 'auto: 60 fps, 8 px ball, bowler in view', W: 960, H: 540, fps: 60, v: 3000, d: 8, exposure: 1 / 500, lines: false, size: true, withPerson: true },
   { name: 'auto: bowler only, no ball', W: 960, H: 540, fps: 30, v: 0, withPerson: true, lines: false },
+  { name: 'auto: phone upright, 12 picture-widths per second', W: 540, H: 960, fps: 60, v: 6480, d: 16, exposure: 1 / 1000, lines: false, size: true },
+  { name: 'auto: too fast to measure is reported, not guessed', W: 960, H: 540, fps: 30, v: 16000, d: 16, exposure: 1 / 1000, lines: false, expectMiss: 'few' },
 ];
 
 let failed = 0;
@@ -95,7 +99,10 @@ for (const c of cases) {
   const events = run(c);
   let ok;
   let detail;
-  if (c.v) {
+  if (c.expectMiss) {
+    ok = events.length === 0 && events.miss === c.expectMiss;
+    detail = `${events.length} readings, reason given: ${events.miss ?? 'none'}`;
+  } else if (c.v) {
     const e = events[0];
     const err = e ? Math.abs(e.pxPerSec - c.v) / c.v : 1;
     const sizeErr = e && c.size ? Math.abs(e.ballPx - c.d) / c.d : 0;
