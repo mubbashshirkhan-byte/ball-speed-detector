@@ -166,12 +166,23 @@ const BODY = String.raw`
           <input id="limit" type="number" inputmode="decimal" min="1" step="1">
         </div>
         <div class="field">
+          <label for="min-speed" id="min-label">Ignore below (km/h)</label>
+          <input id="min-speed" type="number" inputmode="decimal" min="0" step="1">
+        </div>
+        <div class="field">
           <label for="pitch">Scale</label>
           <select id="pitch">
             <option value="auto">Automatic</option>
             <option value="standard">Crease lines · 17.68 m</option>
             <option value="custom">Lines · other distance</option>
           </select>
+        </div>
+        <div class="field">
+          <span class="label">Unit</span>
+          <div class="seg" role="group" aria-label="Speed unit">
+            <button id="unit-kmh" type="button" data-unit="km/h">km/h</button>
+            <button id="unit-mph" type="button" data-unit="mph">mph</button>
+          </div>
         </div>
         <div class="field wide" id="ball-field">
           <label for="ball">Ball (its size sets the scale automatically)</label>
@@ -184,14 +195,7 @@ const BODY = String.raw`
           <label for="distance">Distance between the two lines (m)</label>
           <input id="distance" type="number" inputmode="decimal" min="0.5" step="0.1">
         </div>
-        <div class="field">
-          <span class="label">Unit</span>
-          <div class="seg" role="group" aria-label="Speed unit">
-            <button id="unit-kmh" type="button" data-unit="km/h">km/h</button>
-            <button id="unit-mph" type="button" data-unit="mph">mph</button>
-          </div>
-        </div>
-        <div class="field">
+        <div class="field wide">
           <label for="sens">Sensitivity</label>
           <input id="sens" type="range" min="1" max="10" step="1">
         </div>
@@ -228,7 +232,7 @@ const BODY = String.raw`
 const APP_JS = String.raw`
 (function () {
   var UNITS = { 'km/h': 3.6, 'mph': 2.236936 };
-  var VERSION = 8;             // shown on screen, to tell which build a phone is running
+  var VERSION = 9;            // shown on screen, to tell which build a phone is running
   var PROC_MAX = 960;          // longest side of the frame the detector sees
   var KEY = 'ball-speed-settings-v3';
   var BALL_M = { cricket: 0.072, tennis: 0.067 };  // ball diameters in metres
@@ -242,7 +246,8 @@ const APP_JS = String.raw`
 
   var settings = {
     // pitch: 'auto' = scale from the ball's size; 'standard' / 'custom' = scale from two lines
-    limit: 100, unit: 'km/h', pitch: 'auto', ball: 'cricket', distance: 15, a: 0.1, b: 0.9, sens: 6,
+    // minSpeed: slower movement is not a delivery and is ignored (same unit as the limit)
+    limit: 100, minSpeed: 20, unit: 'km/h', pitch: 'auto', ball: 'cricket', distance: 15, a: 0.1, b: 0.9, sens: 6,
     bowlers: ['Bowler 1'], bowler: 'Bowler 1'
   };
   function readJson(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
@@ -404,6 +409,7 @@ const APP_JS = String.raw`
     if (!cameraOk) { dot.className = 'problem'; text = $('stage-msg').textContent; }
     else if (!running) { dot.className = ''; text = 'Paused'; }
     else if (busy) { dot.className = 'problem'; text = 'Camera is moving. Keep the phone still.'; }
+    else if (unstable) { dot.className = 'problem'; text = 'Too much movement in the picture to pick out a ball. Stand the phone on something so it is still.'; }
     else if (note && performance.now() < noteUntil) { dot.className = 'problem'; text = note; }
     else { dot.className = 'live'; text = 'Watching for the ball' + (fps ? ' · ' + Math.round(fps) + ' frames/s' : ''); }
     $('status-text').textContent = text;
@@ -424,6 +430,8 @@ const APP_JS = String.raw`
 
   function renderSettings() {
     $('limit').value = settings.limit;
+    $('min-speed').value = settings.minSpeed;
+    $('min-label').textContent = 'Ignore below (' + settings.unit + ')';
     $('pitch').value = settings.pitch;
     $('distance-field').hidden = settings.pitch !== 'custom';
     $('ball-field').hidden = !isAuto();
@@ -474,8 +482,12 @@ const APP_JS = String.raw`
   var MISS_TEXT = {
     few: 'Something crossed too fast to measure (seen in only 2 frames). Move the phone further back.',
     short: 'Movement seen, but it did not travel far enough across the picture.',
-    unsteady: 'Movement seen, but not along a steady path. Try again.'
+    unsteady: 'Movement seen, but not along a steady path like a ball.',
+    crowded: 'Too many things were moving to tell which was the ball.',
+    middle: 'Movement seen, but it did not cross the picture like a ball.'
   };
+  var MAX_PLAUSIBLE_MPS = 70;   // about 250 km/h; anything faster is not a bowled ball
+  var noisySeen = 0, unstable = false;
   var shownRecord = null; // the delivery on the big readout (this session only)
   function renderLast() {
     var d = shownRecord;
@@ -502,6 +514,13 @@ const APP_JS = String.raw`
       var metres = lineDistance();
       if (gapPx < 8 || !(metres > 0)) return;
       mps = event.pxPerSec * metres / gapPx;
+    }
+    // Too slow or impossibly fast: not a delivery, so nothing is recorded.
+    if (mps < settings.minSpeed / UNITS[settings.unit] || mps > MAX_PLAUSIBLE_MPS) {
+      note = 'Ignored movement at ' + fmtSpeed(mps) + ' (outside the range for a delivery).';
+      noteUntil = performance.now() + 5000;
+      renderStatus();
+      return;
     }
     note = '';
     var limitMps = settings.limit / UNITS[settings.unit];
@@ -609,6 +628,7 @@ const APP_JS = String.raw`
     if (r.blobs.length) smallSeen = r.blobs.length;
     if (r.large) largeSeen = r.large;
     if (r.busy) busySeen = true;
+    if (r.noisy) noisySeen++;
     if (r.busy !== busy) { busy = r.busy; renderStatus(); }
     if (r.event) onDelivery(r.event);
     else if (r.miss) {
@@ -624,6 +644,8 @@ const APP_JS = String.raw`
   }
   // Once a second: refresh the status and the "what the camera sees" line.
   setInterval(function () {
+    unstable = framesSeen > 0 && noisySeen > framesSeen / 2;
+    noisySeen = 0;
     if (cameraOk && running && !busy) renderStatus();
     var text = 'Version ' + VERSION;
     if (cameraOk) {
@@ -643,6 +665,10 @@ const APP_JS = String.raw`
   $('limit').addEventListener('change', function () {
     var v = parseFloat(this.value);
     if (v > 0) { settings.limit = v; save(); } else { this.value = settings.limit; }
+  });
+  $('min-speed').addEventListener('change', function () {
+    var v = parseFloat(this.value);
+    if (v >= 0) { settings.minSpeed = v; save(); } else { this.value = settings.minSpeed; }
   });
   $('distance').addEventListener('change', function () {
     var v = parseFloat(this.value);
@@ -664,6 +690,7 @@ const APP_JS = String.raw`
       if (next === settings.unit) return;
       // Keep the limit meaning the same real speed when the unit changes.
       settings.limit = Math.round(settings.limit / UNITS[settings.unit] * UNITS[next]);
+      settings.minSpeed = Math.round(settings.minSpeed / UNITS[settings.unit] * UNITS[next]);
       settings.unit = next;
       save(); renderSettings(); renderLast(); renderRecent();
     });

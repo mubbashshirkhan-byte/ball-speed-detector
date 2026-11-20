@@ -18,6 +18,10 @@ A camera sees movement in pixels, so it needs a scale to turn that into km/h. Th
 - **Automatic** (default): nothing to set up. The ball is a known size (a cricket ball is 7.2 cm across), so its width in the picture gives the scale. The ball must look big enough to size, which is why the phone has to be within a few metres of its path; if it is too far the app says so instead of guessing.
 - **Crease lines**: drag two lines onto the bowler's and batsman's creases (17.68 m apart on a standard pitch, or enter another distance). The phone can stand further back and see the whole pitch. This is the more accurate method when the lines are placed carefully.
 
+### What counts as a delivery
+
+The app only records a speed when something small, clear of any person, crosses the picture the way a ball does: followed for at least four frames, in a straight line at a steady speed, keeping its size, and coming in from one side and going out by another (or into a person). Anything slower than **Ignore below** is not recorded. If the phone is hand-held or the background is full of movement, the app says so and measures nothing rather than guessing.
+
 The reading is the ball's average speed while it crosses the picture. Accuracy depends on the camera frame rate (shown on screen), the light, and in automatic mode on how large and sharp the ball appears.
 
 ## History
