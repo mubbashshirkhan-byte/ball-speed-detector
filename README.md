@@ -4,15 +4,21 @@ Measures the speed of a bowled ball with the phone camera and calls "No ball" al
 
 ## Use it
 
-1. Stand the phone side-on to the pitch and keep it still (a tripod helps). Landscape gives the widest view.
-2. Allow camera access.
-3. Drag the two yellow lines onto the bowler's crease and the batsman's crease. The distance is set automatically to a standard pitch (17.68 m between the popping creases). For a shorter or longer pitch, choose **Other distance** and enter it.
-4. Enter the maximum allowed speed.
-5. Bowl. The speed appears with **Legal** or **NO BALL**; over the limit the phone says "No ball".
+1. Allow camera access.
+2. Stand the phone side-on to the ball's path, 2 to 4 m away, and keep it still (a tripod helps). Landscape gives the widest view.
+3. Enter the maximum allowed speed and pick the ball type.
+4. Bowl. The speed appears with **Legal** or **NO BALL**; over the limit the phone says "No ball".
 
 Tap **Test sound** once after opening so the phone is allowed to speak, and to check the volume.
 
-The reading is the ball's average speed between the two lines. Accuracy depends on the camera frame rate (shown on screen), how carefully the lines are placed, and the light.
+### How the speed is worked out
+
+A camera sees movement in pixels, so it needs a scale to turn that into km/h. There are two ways to get it, chosen under **Scale**:
+
+- **Automatic** (default): nothing to set up. The ball is a known size (a cricket ball is 7.2 cm across), so its width in the picture gives the scale. The ball must look big enough to size, which is why the phone has to be within a few metres of its path; if it is too far the app says so instead of guessing.
+- **Crease lines**: drag two lines onto the bowler's and batsman's creases (17.68 m apart on a standard pitch, or enter another distance). The phone can stand further back and see the whole pitch. This is the more accurate method when the lines are placed carefully.
+
+The reading is the ball's average speed while it crosses the picture. Accuracy depends on the camera frame rate (shown on screen), the light, and in automatic mode on how large and sharp the ball appears.
 
 ## History
 

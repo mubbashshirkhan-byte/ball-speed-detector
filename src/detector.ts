@@ -27,12 +27,12 @@ function createDetector(width, height) {
 
   var MIN_AREA = 3;
   var MAX_BLOB_W = Math.round(width * 0.16);            // allows for motion-blur streaks
-  var MAX_BLOB_H = Math.max(10, Math.round(height * 0.07));
+  var MAX_BLOB_H = Math.max(10, Math.round(height * 0.1));
   var MIN_V = width * 0.25;                             // px/s; slower things are not a bowled ball
   var MAX_V = width * 8;
   var EXPIRE_S = 0.18;                                  // a track ends after this long unseen
   var COOLDOWN_S = 1.0;                                 // one reading per delivery
-  var MIN_POINTS = 4;
+  var MIN_POINTS = 3;
   var MAX_FIT_POINTS = 14;
   var MAX_BLOBS = 40;
   var MAX_TRACKS = 30;
@@ -73,6 +73,24 @@ function createDetector(width, height) {
     return { slope: slope, inliers: inliers, count: m };
   }
 
+  // The ball's diameter in pixels, used to work out the picture's scale without
+  // any calibration. A fast ball smears into a streak along its path, but the
+  // streak is still one ball wide across the path, so the blob's height gives the
+  // diameter once the tilt of the path is allowed for.
+  function ballSize(pts) {
+    var m = Math.min(pts.length, MAX_FIT_POINTS), sizes = [];
+    for (var i = 0; i < m; i++) {
+      var a = pts[i > 0 ? i - 1 : 0], b = pts[i < m - 1 ? i + 1 : m - 1];
+      var dx = b.x - a.x, dy = b.y - a.y;
+      if (dx < 0) dx = -dx; if (dy < 0) dy = -dy;
+      var tilt = dx > 0 ? dy / dx : 0;
+      if (tilt > 0.6) continue;
+      var d = (pts[i].h - pts[i].w * tilt) / (1 - tilt);
+      sizes.push(d < 1 ? 1 : d);
+    }
+    return sizes.length ? median(sizes) : 0;
+  }
+
   function findBlobs(x0, x1) {
     var blobs = [];
     for (var y = 0; y < height; y++) {
@@ -101,7 +119,7 @@ function createDetector(width, height) {
         }
         if (area >= MIN_AREA && (maxX - minX + 1) <= MAX_BLOB_W && (maxY - minY + 1) <= MAX_BLOB_H
             && blobs.length < MAX_BLOBS) {
-          blobs.push({ x: sumX / area, y: sumY / area, area: area });
+          blobs.push({ x: sumX / area, y: sumY / area, area: area, w: maxX - minX + 1, h: maxY - minY + 1 });
         }
       }
     }
@@ -134,13 +152,15 @@ function createDetector(width, height) {
       }
       if (best >= 0) {
         tr.vx = tr.pts.length === 1 ? bestV : tr.vx * 0.5 + bestV * 0.5;
-        tr.pts.push({ t: t, x: blobs[best].x, y: blobs[best].y });
+        tr.pts.push({ t: t, x: blobs[best].x, y: blobs[best].y, w: blobs[best].w, h: blobs[best].h });
         blobs[best].linked = true;
       }
     }
     // Any blob that did not continue a track may be the start of one.
     for (i = 0; i < blobs.length; i++) {
-      if (!blobs[i].linked) tracks.push({ pts: [{ t: t, x: blobs[i].x, y: blobs[i].y }], vx: 0 });
+      if (!blobs[i].linked) {
+        tracks.push({ pts: [{ t: t, x: blobs[i].x, y: blobs[i].y, w: blobs[i].w, h: blobs[i].h }], vx: 0 });
+      }
     }
     if (tracks.length > MAX_TRACKS) {
       tracks.sort(function (a, b) { return b.pts.length - a.pts.length; });
@@ -163,6 +183,7 @@ function createDetector(width, height) {
         pending = {
           pxPerSec: f.slope < 0 ? -f.slope : f.slope,
           direction: f.slope > 0 ? 1 : -1,
+          ballPx: ballSize(pts),
           points: pts,
           inliers: f.inliers,
           at: t

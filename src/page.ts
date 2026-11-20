@@ -131,7 +131,7 @@ const BODY = String.raw`
       <div id="frame">
         <video id="video" playsinline muted autoplay></video>
         <canvas id="overlay"></canvas>
-        <div id="hint">Drag the two lines onto the bowler's and the batsman's crease</div>
+        <div id="hint"></div>
       </div>
       <div id="stage-msg">Starting camera…</div>
     </div>
@@ -164,10 +164,18 @@ const BODY = String.raw`
           <input id="limit" type="number" inputmode="decimal" min="1" step="1">
         </div>
         <div class="field">
-          <label for="pitch">Bowler to batsman</label>
+          <label for="pitch">Scale</label>
           <select id="pitch">
-            <option value="standard">Standard · 17.68 m</option>
-            <option value="custom">Other distance</option>
+            <option value="auto">Automatic</option>
+            <option value="standard">Crease lines · 17.68 m</option>
+            <option value="custom">Lines · other distance</option>
+          </select>
+        </div>
+        <div class="field wide" id="ball-field">
+          <label for="ball">Ball (its size sets the scale automatically)</label>
+          <select id="ball">
+            <option value="cricket">Cricket ball · 7.2 cm</option>
+            <option value="tennis">Tennis or tape ball · 6.7 cm</option>
           </select>
         </div>
         <div class="field wide" id="distance-field" hidden>
@@ -218,8 +226,10 @@ const BODY = String.raw`
 const APP_JS = String.raw`
 (function () {
   var UNITS = { 'km/h': 3.6, 'mph': 2.236936 };
-  var PROC_MAX = 640;          // longest side of the frame the detector sees
-  var KEY = 'ball-speed-settings-v2';
+  var PROC_MAX = 960;          // longest side of the frame the detector sees
+  var KEY = 'ball-speed-settings-v3';
+  var BALL_M = { cricket: 0.072, tennis: 0.067 };  // ball diameters in metres
+  var MIN_BALL_PX = 4;         // below this the ball is too small to size reliably
   var RECORDS_KEY = 'ball-speed-records-v1';
   var MAX_RECORDS = 3000;
 
@@ -228,7 +238,8 @@ const APP_JS = String.raw`
   var STANDARD_PITCH_M = 17.68;
 
   var settings = {
-    limit: 100, unit: 'km/h', pitch: 'standard', distance: 15, a: 0.1, b: 0.9, sens: 6,
+    // pitch: 'auto' = scale from the ball's size; 'standard' / 'custom' = scale from two lines
+    limit: 100, unit: 'km/h', pitch: 'auto', ball: 'cricket', distance: 15, a: 0.1, b: 0.9, sens: 6,
     bowlers: ['Bowler 1'], bowler: 'Bowler 1'
   };
   function readJson(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
@@ -238,6 +249,9 @@ const APP_JS = String.raw`
   if (!settings.bowlers.length) settings.bowlers = ['Bowler 1'];
   if (settings.bowlers.indexOf(settings.bowler) < 0) settings.bowler = settings.bowlers[0];
   function save() { writeJson(KEY, settings); }
+  if (!BALL_M[settings.ball]) settings.ball = 'cricket';
+  if (['auto', 'standard', 'custom'].indexOf(settings.pitch) < 0) settings.pitch = 'auto';
+  function isAuto() { return settings.pitch === 'auto'; }
   function lineDistance() { return settings.pitch === 'custom' ? settings.distance : STANDARD_PITCH_M; }
 
   // Every delivery: { t: time (ms), b: bowler, mps: speed, lim: limit in m/s, nb: no ball }
@@ -315,14 +329,16 @@ const APP_JS = String.raw`
     octx.clearRect(0, 0, w, h);
     var xa = settings.a * w, xb = settings.b * w;
     var lo = Math.min(xa, xb), hi = Math.max(xa, xb);
-    octx.fillStyle = 'rgba(0,0,0,0.45)';
-    octx.fillRect(0, 0, lo, h);
-    octx.fillRect(hi, 0, w - hi, h);
+    if (!isAuto()) {
+      octx.fillStyle = 'rgba(0,0,0,0.45)';
+      octx.fillRect(0, 0, lo, h);
+      octx.fillRect(hi, 0, w - hi, h);
+    }
 
     octx.lineWidth = 2 * dpr;
     octx.font = 'bold ' + (12 * dpr) + 'px system-ui, sans-serif';
     octx.textAlign = 'center';
-    [['Bowler', xa], ['Batsman', xb]].forEach(function (l) {
+    (isAuto() ? [] : [['Bowler', xa], ['Batsman', xb]]).forEach(function (l) {
       octx.strokeStyle = '#FFD24A';
       octx.beginPath(); octx.moveTo(l[1], 0); octx.lineTo(l[1], h); octx.stroke();
       // Name tag, kept inside the picture even when the line is near an edge.
@@ -357,6 +373,7 @@ const APP_JS = String.raw`
     return Math.max(0.02, Math.min(0.98, (e.clientX - r.left) / r.width));
   }
   overlay.addEventListener('pointerdown', function (e) {
+    if (isAuto()) return;
     var x = pointerX(e);
     dragging = Math.abs(x - settings.a) <= Math.abs(x - settings.b) ? 'a' : 'b';
     settings[dragging] = x;
@@ -384,6 +401,7 @@ const APP_JS = String.raw`
     if (!cameraOk) { dot.className = 'problem'; text = $('stage-msg').textContent; }
     else if (!running) { dot.className = ''; text = 'Paused'; }
     else if (busy) { dot.className = 'problem'; text = 'Camera is moving. Keep the phone still.'; }
+    else if (note && performance.now() < noteUntil) { dot.className = 'problem'; text = note; }
     else { dot.className = 'live'; text = 'Watching for the ball' + (fps ? ' · ' + Math.round(fps) + ' frames/s' : ''); }
     $('status-text').textContent = text;
     var btn = $('btn-toggle');
@@ -403,8 +421,14 @@ const APP_JS = String.raw`
 
   function renderSettings() {
     $('limit').value = settings.limit;
-    $('pitch').value = settings.pitch === 'custom' ? 'custom' : 'standard';
+    $('pitch').value = settings.pitch;
     $('distance-field').hidden = settings.pitch !== 'custom';
+    $('ball-field').hidden = !isAuto();
+    $('ball').value = settings.ball;
+    $('hint').hidden = false;
+    $('hint').textContent = isAuto()
+      ? 'Stand the phone side-on to the ball, 2 to 4 m from its path, and keep it still'
+      : 'Drag the two lines onto the bowler\'s and the batsman\'s crease';
     $('distance').value = settings.distance;
     $('sens').value = settings.sens;
     $('limit-label').textContent = 'Max speed (' + settings.unit + ')';
@@ -441,6 +465,7 @@ const APP_JS = String.raw`
     records.slice(0, 5).forEach(function (r) { box.appendChild(recordRow(r, false)); });
   }
 
+  var note = '', noteUntil = 0; // a short-lived message on the status line
   var shownRecord = null; // the delivery on the big readout (this session only)
   function renderLast() {
     var d = shownRecord;
@@ -451,10 +476,24 @@ const APP_JS = String.raw`
   }
 
   function onDelivery(event) {
-    var gapPx = Math.abs(settings.b - settings.a) * proc.width;
-    var metres = lineDistance();
-    if (gapPx < 8 || !(metres > 0)) return;
-    var mps = event.pxPerSec * metres / gapPx;
+    var mps;
+    if (isAuto()) {
+      // Scale from the ball itself: it is a known size, so its width in pixels
+      // tells how many metres one pixel covers at the ball's distance.
+      if (!(event.ballPx >= MIN_BALL_PX)) {
+        note = 'The ball looks too small to measure. Move the phone closer to its path.';
+        noteUntil = performance.now() + 6000;
+        renderStatus();
+        return;
+      }
+      mps = event.pxPerSec * BALL_M[settings.ball] / event.ballPx;
+    } else {
+      var gapPx = Math.abs(settings.b - settings.a) * proc.width;
+      var metres = lineDistance();
+      if (gapPx < 8 || !(metres > 0)) return;
+      mps = event.pxPerSec * metres / gapPx;
+    }
+    note = '';
     var limitMps = settings.limit / UNITS[settings.unit];
     var record = { t: Date.now(), b: settings.bowler, mps: mps, lim: limitMps, nb: mps > limitMps };
     records.unshift(record);
@@ -544,7 +583,8 @@ const APP_JS = String.raw`
     lastT = t;
     pctx.drawImage(video, 0, 0, proc.width, proc.height);
     var img = pctx.getImageData(0, 0, proc.width, proc.height);
-    var r = detector.process(img.data, t, settings.a * proc.width, settings.b * proc.width, threshold());
+    var auto = isAuto();
+    var r = detector.process(img.data, t, auto ? 0 : settings.a * proc.width, auto ? proc.width : settings.b * proc.width, threshold());
     blobs = r.blobs;
     if (r.busy !== busy) { busy = r.busy; renderStatus(); }
     if (r.event) onDelivery(r.event);
@@ -566,8 +606,13 @@ const APP_JS = String.raw`
     if (v > 0) { settings.distance = v; save(); } else { this.value = settings.distance; }
   });
   $('pitch').addEventListener('change', function () {
-    settings.pitch = this.value === 'custom' ? 'custom' : 'standard';
-    save(); renderSettings();
+    settings.pitch = ['auto', 'standard', 'custom'].indexOf(this.value) < 0 ? 'auto' : this.value;
+    if (detector) detector.reset();
+    save(); renderSettings(); drawOverlay();
+  });
+  $('ball').addEventListener('change', function () {
+    settings.ball = BALL_M[this.value] ? this.value : 'cricket';
+    save();
   });
   $('sens').addEventListener('input', function () { settings.sens = parseInt(this.value, 10) || 6; save(); });
   ['unit-kmh', 'unit-mph'].forEach(function (id) {
