@@ -92,14 +92,7 @@
   .rows .row b.ok { color: var(--accent); }
   .rows .empty { color: var(--muted); font-size: 13px; }
 
-  #account {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); padding-top: 12px;
-  }
-  #account b { color: var(--text); }
-  #account div { min-width: 0; }
-
-  /* Full-screen views: sign-in and history */
+  /* Full-screen view: history */
   .view {
     position: fixed; inset: 0; z-index: 10; background: var(--bg); overflow-y: auto;
     padding: calc(env(safe-area-inset-top, 0px) + 16px) calc(env(safe-area-inset-right, 0px) + 16px)
@@ -109,13 +102,6 @@
   .view h1 { font-size: 22px; margin: 0; }
   .view p { margin: 0; color: var(--muted); line-height: 1.5; }
   .view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  #login .view-inner { min-height: 100%; justify-content: center; }
-  #code {
-    width: 100%; min-height: 110px; border-radius: 12px; border: 1px solid var(--border);
-    background: var(--card); padding: 12px; font-size: 16px; resize: none;
-    -webkit-user-select: text; user-select: text; word-break: break-all;
-  }
-  #login-error { color: var(--danger); min-height: 1.5em; }
   #summary {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 12px 14px; color: var(--text); line-height: 1.6;
@@ -128,7 +114,7 @@
     #speed { font-size: 48px; }
   }
 </style></head><body>
-  <div id="app" hidden>
+  <div id="app">
     <div id="stage">
       <div id="frame">
         <video id="video" playsinline muted autoplay></video>
@@ -197,20 +183,6 @@
       <div class="rows" id="recent"></div>
       <button class="btn plain" id="btn-history" type="button">Full history</button>
 
-      <div id="account">
-        <div><b id="account-name"></b><br><span id="account-until"></span></div>
-        <button class="btn plain small" id="btn-signout" type="button">Sign out</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="view" id="login" hidden>
-    <div class="view-inner">
-      <h1>Ball Speed Detector</h1>
-      <p>Paste the access code or link you were given. Access lasts until the date set for your code.</p>
-      <textarea id="code" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Access code"></textarea>
-      <div id="login-error" role="alert"></div>
-      <button class="btn primary" id="btn-signin" type="button">Sign in</button>
     </div>
   </div>
 
@@ -458,12 +430,7 @@ function createDetector(width, height) {
   var PROC_MAX = 640;          // longest side of the frame the detector sees
   var KEY = 'ball-speed-settings-v2';
   var RECORDS_KEY = 'ball-speed-records-v1';
-  var PASS_KEY = 'ball-speed-pass-v1';
-  var SEEN_KEY = 'ball-speed-seen-v1';
   var MAX_RECORDS = 3000;
-
-  // Public half of the key that signs access codes (scripts/setup-access-keys.mjs writes this line).
-  var ACCESS_PUBLIC_KEY = {"kty":"EC","crv":"P-256","x":"t9fmBCVb1KmMOgj1zPPLzAWOyDN6nMVdzYRuq9_HpDY","y":"5Ptch8TjZSfx4Ra4bo8jo54CbIefay83M2vYmTsK_tw"}; // access-public-key
 
   // Popping crease to popping crease on a standard 22-yard pitch: the bowler
   // releases at one, the batsman stands at the other.
@@ -495,7 +462,6 @@ function createDetector(width, height) {
 
   var detector = null, running = true, cameraOk = false, busy = false, loopGen = 0;
   var lastT = -1, fps = 0, blobs = [], lastTrack = null, lastTrackAt = 0;
-  var session = null;
 
   var pad = function (v) { return String(v).padStart(2, '0'); };
   function fmtTime(ms) { var d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
@@ -863,14 +829,6 @@ function createDetector(width, height) {
     renderStatus();
   }
 
-  function stopCamera() {
-    loopGen++;
-    cameraOk = false; blobs = []; lastT = -1; fps = 0;
-    var stream = video.srcObject;
-    if (stream && stream.getTracks) stream.getTracks().forEach(function (t) { t.stop(); });
-    video.srcObject = null;
-  }
-
   function startCamera() {
     $('stage-msg').hidden = false;
     $('stage-msg').textContent = 'Starting camera…';
@@ -908,115 +866,9 @@ function createDetector(width, height) {
     });
   }
 
-  // ---------- sign-in: time-limited access codes ----------
-  // A code is "<payload>.<signature>". The payload is { n: name, e: expiry (seconds) },
-  // signed with a private key that only the app's owner holds. The page can check
-  // a code with the public key above but cannot create one.
-  function b64uToBytes(s) {
-    s = s.replace(/-/g, '+').replace(/_/g, '/');
-    while (s.length % 4) s += '=';
-    var bin = atob(s), out = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-  function verifyPass(token) {
-    var parts = String(token).split('.');
-    if (parts.length !== 2 || !ACCESS_PUBLIC_KEY) return Promise.resolve(null);
-    var payload, sig;
-    try { payload = b64uToBytes(parts[0]); sig = b64uToBytes(parts[1]); } catch (e) { return Promise.resolve(null); }
-    return crypto.subtle.importKey('jwk', ACCESS_PUBLIC_KEY, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
-      .then(function (key) { return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, payload); })
-      .then(function (ok) {
-        if (!ok) return null;
-        var p = JSON.parse(new TextDecoder().decode(payload));
-        return p && typeof p.n === 'string' && typeof p.e === 'number' ? p : null;
-      })
-      .catch(function () { return null; });
-  }
-  // The latest time this device has shown, so winding the clock back does not extend access.
-  function nowMs() {
-    var n = Date.now(), seen = 0;
-    try { seen = parseInt(localStorage.getItem(SEEN_KEY) || '0', 10) || 0; } catch (e) {}
-    if (n > seen) { try { localStorage.setItem(SEEN_KEY, String(n)); } catch (e) {} return n; }
-    return seen;
-  }
-  function forgetPass() { try { localStorage.removeItem(PASS_KEY); } catch (e) {} }
-
-  function showLogin(message) {
-    session = null;
-    stopCamera();
-    $('history-view').hidden = true;
-    $('app').hidden = true;
-    $('login').hidden = false;
-    $('login-error').textContent = message || '';
-  }
-  function enter(pass, token) {
-    session = pass;
-    try { localStorage.setItem(PASS_KEY, token); } catch (e) {}
-    $('code').value = '';
-    $('login').hidden = true;
-    $('app').hidden = false;
-    $('account-name').textContent = pass.n;
-    $('account-until').textContent = 'Access until ' + fmtDate(pass.e * 1000) + ', ' + fmtTime(pass.e * 1000).slice(0, 5);
-    startCamera();
-  }
-  // fallback: a code already saved on this device, tried if this one is no good
-  // (so opening an old link does not sign out someone whose access is still valid).
-  function tryToken(token, typed, fallback) {
-    if (!window.crypto || !crypto.subtle) {
-      showLogin('This browser cannot check access codes. Open the page in Safari or Chrome.');
-      return;
-    }
-    verifyPass(token).then(function (pass) {
-      var live = pass && pass.e * 1000 > nowMs();
-      if (!live && fallback && fallback !== token) { tryToken(fallback, false); return; }
-      if (!pass) {
-        showLogin(typed ? 'That access code is not valid. Check that you copied all of it.' : '');
-        return;
-      }
-      if (!live) {
-        var stored = null;
-        try { stored = localStorage.getItem(PASS_KEY); } catch (e) {}
-        if (stored === token) forgetPass();
-        showLogin('Access for ' + pass.n + ' ended on ' + fmtDate(pass.e * 1000) + '. Ask for a new code.');
-        return;
-      }
-      enter(pass, token);
-    });
-  }
-  function tokenFromText(text) {
-    var m = /[#?&]k=([A-Za-z0-9_.-]+)/.exec(text);
-    return m ? m[1] : text.replace(/\s+/g, '');
-  }
-  $('btn-signin').addEventListener('click', function () {
-    var token = tokenFromText($('code').value);
-    if (!token) { $('login-error').textContent = 'Paste your access code first.'; return; }
-    tryToken(token, true);
-  });
-  $('btn-signout').addEventListener('click', function () { forgetPass(); showLogin(''); });
-  setInterval(function () {
-    if (session && session.e * 1000 <= nowMs()) {
-      var ended = session;
-      forgetPass();
-      showLogin('Access for ' + ended.n + ' ended on ' + fmtDate(ended.e * 1000) + '. Ask for a new code.');
-    }
-  }, 30000);
-
   // ---------- start ----------
   frameEl.hidden = true;
   renderSettings(); renderLast(); renderRecent(); renderStatus();
-
-  var linkToken = null;
-  var hashMatch = /[#&]k=([A-Za-z0-9_.-]+)/.exec(location.hash || '');
-  if (hashMatch) {
-    linkToken = hashMatch[1];
-    // Take the code out of the address bar so it is not shared by accident.
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
-  }
-  var storedToken = null;
-  try { storedToken = localStorage.getItem(PASS_KEY); } catch (e) {}
-  if (linkToken) tryToken(linkToken, true, storedToken);
-  else if (storedToken) tryToken(storedToken, false);
-  else showLogin('');
+  startCamera();
 })();
 </script></body></html>

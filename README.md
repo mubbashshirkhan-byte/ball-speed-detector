@@ -14,16 +14,6 @@ Tap **Test sound** once after opening so the phone is allowed to speak, and to c
 
 The reading is the ball's average speed between the two lines. Accuracy depends on the camera frame rate (shown on screen), how carefully the lines are placed, and the light.
 
-## Sign-in and access
-
-The app opens only with an access code, and each code stops working at a time chosen when it is issued.
-
-- **Issue access**: open `access-admin.html` on the owner's PC, enter the person's name and how long access should last, and send them the link it creates. (Or run `node scripts/make-access.mjs "Name" 30d`.)
-- **Sign in**: open the link, or paste the code on the sign-in screen. The phone stays signed in until the access ends or **Sign out** is tapped.
-- `access-private-key.json` and `access-admin.html` are secret and are not in the repository. Anyone holding them can issue access. Running `node scripts/setup-access-keys.mjs --force` replaces the key and cancels every code issued so far.
-
-Codes are checked inside the page, with no server. That keeps ordinary users out once their time is up, but someone technical could copy the public source and remove the check, so treat it as a gate rather than strong protection.
-
 ## History
 
 Choose the bowler before each spell (**Add** creates a new one). Every delivery is saved on the phone with the bowler, speed, time, the limit in force and the verdict. **Full history** lists them, filtered by bowler, with the fastest and average speed and the number of no balls. History stays on that phone; it is not shared between devices.
